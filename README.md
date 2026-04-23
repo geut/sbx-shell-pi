@@ -28,6 +28,9 @@ Published on GitHub Container Registry (GHCR): `ghcr.io/geut/sbx-shell-pi:node24
 sbx run -t ghcr.io/geut/sbx-shell-pi:node24 shell [PROJECT_DIR]
 ```
 
+This would automatically load the template image and then run pi. Creating a **new sandbox**. 
+Further runnings would be simpler, just list (`sbx ls`) your sandboxes and run it (`sbx run [sandbox]`). 
+
 ## The Keys
 
 How you provide credentials depends on the model/provider. For Claude/Codex and many others, sbx secret is a good starting point: https://docs.docker.com/reference/cli/sbx/secret/.

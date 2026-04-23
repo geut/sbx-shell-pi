@@ -12,10 +12,15 @@ RUN apt-get update \
         > /etc/apt/sources.list.d/nodesource.list \
     && apt-get update \
     && apt-get install -y nodejs \
-    && npm install -g @mariozechner/pi-coding-agent \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 USER agent
+
+# agent-local npm "global" installs
+RUN mkdir -p "$HOME/.npm-global" \
+  && npm config set prefix "$HOME/.npm-global" \
+  && printf '\n# npm user-global prefix\nexport PATH="$HOME/.npm-global/bin:$PATH"\n' >> ~/.bashrc \
+  && npm install -g @mariozechner/pi-coding-agent@latest
 
 RUN printf '\n# Auto-launch pi coding agent in interactive shells\nif [[ $- == *i* ]] && command -v pi &> /dev/null; then\n    exec pi\nfi\n' >> ~/.bashrc
