@@ -1,6 +1,6 @@
 # sbx-shell-pi
 
-Custom template image for running [pi](https://pi.dev) inside Docker Sandboxes ([`sbx`](https://docs.docker.com/reference/cli/sbx/)).
+Custom template images for running [pi](https://pi.dev) inside Docker Sandboxes ([`sbx`](https://docs.docker.com/reference/cli/sbx/)). Includes single-pi sandboxes and a **factory** variant where multiple pi sessions collaborate via [Herdr](https://herdr.dev).
 ___
 
 > Docker Sandboxes (`sbx`) are a nice way to run coding agents with a bit more isolation and a bit less YOLO. There’s no “official” support for pi yet (see supported agents [`sbx create` docs](https://docs.docker.com/reference/cli/sbx/create/)), but it’s easy to add via a custom template image.
@@ -10,54 +10,97 @@ ___
 
 ## The Images
 
+### Single-pi images
+
 The [Dockerfile](./Dockerfile) extends the `shell` template, installs Node 24, installs `pi`, and tweaks `~/.bashrc` to auto-launch `pi` in interactive shells.
 
-Published on GitHub Container Registry (GHCR): 
+There is also a [Dockerfile.shell-docker](./Dockerfile.shell-docker) file whose only difference is that it uses the [shell-docker](https://hub.docker.com/layers/docker/sandbox-templates/shell-docker/images/) image. With this image, the agent has access to **its own docker daemon**.
+
+Published on GitHub Container Registry (GHCR):
 - `ghcr.io/geut/sbx-shell-pi:node24`
 - `ghcr.io/geut/sbx-shell-pi:node24-docker`
 
-There is also a [Dockerfile.shell-docker](./Dockerfile.shell-docker) file whose only difference is that it uses the [shell-docker](https://hub.docker.com/layers/docker/sandbox-templates/shell-docker/images/) image. With this image, the agent has access to **its own docker daemon**.
+### Factory image
+
+The [Dockerfile.factory](./Dockerfile.factory) extends `shell-docker` and is the first step toward a **factory sandbox** — multiple pi sessions working together on planning, implementing, reviewing, and testing.
+
+**Includes:**
+- `docker/sandbox-templates:shell-docker` base (in-sandbox Docker daemon + sbx agent user)
+- Node.js v24 from [nodejs.org prebuilt binaries](https://nodejs.org/dist/) (`NODE_VERSION` build arg, default latest v24)
+- [pi](https://pi.dev) coding agent
+- [Herdr](https://herdr.dev) terminal multiplexer
+- `herdr integration install pi` (native pi lifecycle and session reporting in Herdr)
+- Official Herdr agent skill (`npx skills add herdrdev/herdr --skill herdr -g`)
+- Auto-launches Herdr on interactive shell entry (start `pi` inside Herdr panes)
+
+Published on GHCR: `ghcr.io/geut/sbx-shell-pi:node-24-factory`
 
 ## Usage
 
 1. Install `sbx`: https://docs.docker.com/ai/sandboxes/
 
-2. Run the template image
+2. Run a template image
+
+**Single pi (default shell template):**
 
 ```bash
 sbx run -t ghcr.io/geut/sbx-shell-pi:node24 shell [PROJECT_DIR]
 ```
-_OR_
 
-Same as Dockerfile, but based on shell-docker for an in-sandbox Docker daemon
+**Single pi with in-sandbox Docker daemon:**
+
 ```bash
 sbx run -t ghcr.io/geut/sbx-shell-pi:node24-docker shell [PROJECT_DIR]
 ```
 
-This would automatically load the template image and then run pi. Creating a **new sandbox**. 
-Further runnings would be simpler, just list (`sbx ls`) your sandboxes and run it (`sbx run [sandbox]`). 
+**Factory — Herdr orchestrates multiple pi panes (with Docker for testing):**
+
+```bash
+sbx run -t ghcr.io/geut/sbx-shell-pi:node-24-factory shell [PROJECT_DIR]
+```
+
+This loads the template image and starts the sandbox. Single-pi images auto-launch `pi`; the factory image auto-launches **Herdr**. Split panes in Herdr and run `pi` in each one for parallel agents (plan, implement, review, test).
+
+Factory tips:
+- Detach with Herdr prefix `ctrl+b` then `q` — agents keep running ([Herdr quick start](https://herdr.dev/docs/quick-start/))
+- Reattach by running `sbx run [sandbox]` again
+
+Further runs are simpler: list sandboxes (`sbx ls`) and run one (`sbx run [sandbox]`).
 
 ## The Keys
 
 How you provide credentials depends on the model/provider. For Claude/Codex and many others, sbx secret is a good starting point: https://docs.docker.com/reference/cli/sbx/secret/.
 
-In my case, I use the OpenCode Zen service and need to pass OPENCODE_API_KEY. After some digging, this FAQ section on passing custom variables did the trick: 
+In my case, I use the OpenCode Zen service and need to pass OPENCODE_API_KEY. After some digging, this FAQ section on passing custom variables did the trick:
 [How do I set custom environment variables inside a sandbox?](https://docs.docker.com/ai/sandboxes/faq/#how-do-i-set-custom-environment-variables-inside-a-sandbox).
 
 ## Updating the Image
 
 Update the Dockerfile, then build and push.
 
-You’ll need a GitHub Personal Access Token (PAT) with at least read/write permissions for packages. 
+You’ll need a GitHub Personal Access Token (PAT) with at least read/write permissions for packages.
 
 ```bash
 docker build -t ghcr.io/geut/sbx-shell-pi:node24 --push .
 ```
-OR
+
 ```bash
-docker build -t ghcr.io/geut/sbx-shell-pi:node24-docker --push .
+docker build -f Dockerfile.shell-docker -t ghcr.io/geut/sbx-shell-pi:node24-docker --push .
+```
+
+```bash
+docker build -f Dockerfile.factory -t ghcr.io/geut/sbx-shell-pi:node-24-factory --push .
+```
+
+Override the Node version (for a future builder tool or manual builds):
+
+```bash
+docker build -f Dockerfile.factory \
+  --build-arg NODE_VERSION=24.20.0 \
+  -t ghcr.io/geut/sbx-shell-pi:node-24-factory \
+  --push .
 ```
 
 ## Acknowledgements
 
-This is based on Oleg Šelajev's article [Building custom Docker Sandboxes](https://olegselajev.substack.com/p/building-custom-docker-sandboxes). ~~One key difference: local images never worked for me. `sbx save` completes, but referencing a local image fails. sbx appears to look up the image in a registry instead (you can see this by inspecting `sbx daemon` output).~~
+This is based on Oleg Šelajev's article [Building custom Docker Sandboxes](https://olegselajev.substack.com/p/building-custom-docker-sandboxes). 
