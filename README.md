@@ -31,6 +31,7 @@ The [Dockerfile.factory](./Dockerfile.factory) extends `shell-docker` and is the
 - [Herdr](https://herdr.dev) terminal multiplexer
 - `herdr integration install pi` (native pi lifecycle and session reporting in Herdr)
 - Official Herdr agent skill (`npx skills add herdrdev/herdr --skill herdr -g`)
+- [Fresh](https://github.com/sinelaw/fresh) terminal IDE (Linux universal build), default editor (`EDITOR=fresh`)
 - Auto-launches Herdr on interactive shell entry (start `pi` inside Herdr panes)
 
 Published on GHCR: `ghcr.io/geut/sbx-shell-pi:node-24-factory`
@@ -64,6 +65,7 @@ This loads the template image and starts the sandbox. Single-pi images auto-laun
 Factory tips:
 - Detach with Herdr prefix `ctrl+b` then `q` — agents keep running ([Herdr quick start](https://herdr.dev/docs/quick-start/))
 - Reattach by running `sbx run [sandbox]` again
+- **Fresh** is the default editor (`$EDITOR`); run `fresh` in a Herdr pane to edit files, or let agents/tools like `git commit` open it automatically
 
 Further runs are simpler: list sandboxes (`sbx ls`) and run one (`sbx run [sandbox]`).
 
