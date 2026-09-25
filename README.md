@@ -31,6 +31,7 @@ The [Dockerfile.factory](./Dockerfile.factory) extends `shell-docker` and is the
 - [Herdr](https://herdr.dev) terminal multiplexer
 - `herdr integration install pi` (native pi lifecycle and session reporting in Herdr)
 - Official Herdr agent skill (`npx skills add herdrdev/herdr --skill herdr -g`)
+- [pi-herdr-subagents](https://github.com/modem-dev/pi-herdr-subagents) from `main`: `pi install` of `$HOME/.local/share/pi-herdr-subagents`, plus the bundled Herdr plugin linked and enabled. Example agent definitions are not copied; run `/subagents-init` inside pi if you want `worker`, `planner`, `scout`, and `reviewer`.
 - [Fresh](https://github.com/sinelaw/fresh) terminal IDE (Linux universal build), default editor (`EDITOR=fresh`)
 - Auto-launches Herdr on interactive shell entry (start `pi` inside Herdr panes)
 

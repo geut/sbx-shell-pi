@@ -47,4 +47,16 @@ RUN printf '\n# Herdr installer path\nexport PATH="$HOME/.local/bin:$PATH"\n' >>
   && herdr integration install pi \
   && npx --yes skills add herdrdev/herdr --skill herdr -g -y --agent pi --copy
 
+# pi-herdr-subagents: one main checkout, registered with pi and linked as an enabled Herdr plugin
+RUN export PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$PATH" \
+  && herdr_version="$(herdr --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)" \
+  && { [ -n "$herdr_version" ] && [ "$(printf '%s\n%s\n' "0.8.2" "$herdr_version" | sort -V | head -n 1)" = "0.8.2" ] \
+       || { echo "herdr >= 0.8.2 is required (found: ${herdr_version:-unknown})" >&2; exit 1; }; } \
+  && mkdir -p "$HOME/.local/share" \
+  && git clone --depth 1 --branch main https://github.com/modem-dev/pi-herdr-subagents.git "$HOME/.local/share/pi-herdr-subagents" \
+  && pi install "$HOME/.local/share/pi-herdr-subagents" \
+  && herdr plugin link "$HOME/.local/share/pi-herdr-subagents/herdr-plugin" --enabled \
+  && pi list | tee /dev/stderr | grep -F "pi-herdr-subagents" \
+  && herdr plugin list | tee /dev/stderr | grep -F "pi-herdr-subagents"
+
 RUN printf '\n# Auto-launch Herdr in interactive shells\nif [[ $- == *i* ]] && command -v herdr &> /dev/null; then\n    exec herdr\nfi\n' >> ~/.bashrc
