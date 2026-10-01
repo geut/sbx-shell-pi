@@ -1,0 +1,38 @@
+# syntax=docker/sandbox-kit:3
+schemaVersion: "3"
+kind: workload
+displayName: pi with Docker
+description: pi coding agent on Node 24 or newer, with an in-sandbox Docker daemon and Socket Firewall in front of npm
+
+args:
+  node_version:
+    default: "24.20.0"
+    pattern: '^([2-9][4-9]|[3-9][0-9])\.[0-9]+\.[0-9]+$'
+    description: Node.js version to install (24 or newer)
+    buildArg: NODE_VERSION
+  pi_version:
+    default: latest
+    pattern: '^(latest|[0-9]+\.[0-9]+\.[0-9]+)$'
+    description: npm dist-tag or version of @earendil-works/pi-coding-agent
+    buildArg: PI_VERSION
+
+capabilities:
+  - type: com.docker.sandbox/sbx@1
+  - type: com.docker.sandbox/network-policy@1
+    config:
+      runtime:
+        allow:
+          - registry.npmjs.org
+          - github.com
+          - api.github.com
+          - codeload.github.com
+          - raw.githubusercontent.com
+          - objects.githubusercontent.com
+          - release-assets.githubusercontent.com
+          - opencode.ai
+          - api.socket.dev
+          - firewall-api.socket.dev
+  - type: com.docker.sandbox/agent-context@1
+    config:
+      filename: AGENTS.md
+      contentFile: ./context.md
