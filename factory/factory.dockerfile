@@ -66,6 +66,34 @@ RUN herdr_version="$(herdr --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | 
     && pi list | tee /dev/stderr | grep -F "pi-herdr-subagents" \
     && herdr plugin list | tee /dev/stderr | grep -F "pi-herdr-subagents"
 
+# Herdr reads ~/.config/herdr/config.toml for the agent user.
+RUN mkdir -p "$HOME/.config/herdr" \
+    && cat > "$HOME/.config/herdr/config.toml" <<'EOF'
+onboarding = false
+
+[theme]
+name = "terminal"
+auto_switch = true
+
+[terminal]
+default_shell = "/bin/bash"
+kitty_graphics = true
+
+[ui.sidebar.agents]
+row_gap = 0
+rows = [
+  ["state_icon", "agent", "pane"],
+  ["state_text"],
+]
+
+[ui.toast]
+delivery = "herdr"
+delay_seconds = 1
+
+[ui.sound]
+enabled = true
+EOF
+
 WORKDIR /home/agent/workspace
 ENTRYPOINT ["herdr"]
 CMD []
