@@ -19,10 +19,19 @@ args:
     pattern: '^(latest|[0-9]+\.[0-9]+\.[0-9]+)$'
     description: npm dist-tag or version of @earendil-works/pi-coding-agent
     buildArg: PI_VERSION
+  factory_version:
+    default: "0.1.0"
+    pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'
+    description: geut/factory-skills release that provides the factory binary
+    buildArg: FACTORY_VERSION
 
 capabilities:
   - type: com.docker.sandbox/sbx@1
   - type: com.docker.sandbox/long-running@1
+  - type: com.docker.sandbox/port@1
+    config:
+      name: factory-api
+      container: 7731
   - type: com.docker.sandbox/network-policy@1
     config:
       runtime:

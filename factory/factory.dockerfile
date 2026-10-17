@@ -2,6 +2,7 @@ FROM docker/sandbox-templates:shell-docker
 
 ARG NODE_VERSION=24.20.0
 ARG PI_VERSION=latest
+ARG FACTORY_VERSION=0.1.0
 
 USER root
 
@@ -66,6 +67,25 @@ RUN herdr_version="$(herdr --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | 
     && pi list | tee /dev/stderr | grep -F "pi-herdr-subagents" \
     && herdr plugin list | tee /dev/stderr | grep -F "pi-herdr-subagents"
 
+# Factory server: prebuilt binary from the geut/factory-skills release, checked against its .sha256
+RUN case "$(dpkg --print-architecture)" in \
+         amd64) FACTORY_ARCH="x64" ;; \
+         arm64) FACTORY_ARCH="arm64" ;; \
+         *) echo "unsupported arch: $(dpkg --print-architecture)" >&2; exit 1 ;; \
+       esac \
+    && asset="factory-linux-${FACTORY_ARCH}" \
+    && base="https://github.com/geut/factory-skills/releases/download/v${FACTORY_VERSION}" \
+    && cd /tmp \
+    && curl -fsSLO "${base}/${asset}" \
+    && curl -fsSL "${base}/${asset}.sha256" | sha256sum -c - \
+    && mkdir -p "$HOME/.local/bin" \
+    && install -m 0755 "${asset}" "$HOME/.local/bin/factory" \
+    && rm "${asset}" \
+    && factory --help
+
+# factory-up starts `factory serve` in a Herdr workspace and writes the dashboard token
+COPY --chmod=0755 factory-up /usr/local/bin/factory-up
+
 # Herdr reads ~/.config/herdr/config.toml for the agent user.
 RUN mkdir -p "$HOME/.config/herdr" \
     && cat > "$HOME/.config/herdr/config.toml" <<'EOF'
@@ -83,6 +103,7 @@ kitty_graphics = true
 row_gap = 0
 rows = [
   ["state_icon", "agent", "pane"],
+  ["$status", "$task"],
   ["state_text"],
 ]
 

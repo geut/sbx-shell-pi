@@ -34,6 +34,8 @@ Published on GitHub Container Registry (GHCR):
 - Official Herdr agent skill (`npx skills add herdrdev/herdr --skill herdr -g`)
 - [pi-herdr-subagents](https://github.com/modem-dev/pi-herdr-subagents) from `main`: `pi install` of `$HOME/.local/share/pi-herdr-subagents`, plus the bundled Herdr plugin linked and enabled. Example agent definitions are not copied; run `/subagents-init` inside pi if you want `worker`, `planner`, `scout`, and `reviewer`.
 - [Fresh](https://github.com/sinelaw/fresh) terminal IDE (Linux universal build), default editor (`EDITOR=fresh`)
+- `factory` from a [geut/factory-skills release](https://github.com/geut/factory-skills/releases) (`factory_version` kit arg, default `0.1.0`), checked against the release's `.sha256`
+- `factory-up`, which starts the factory server and creates the dashboard's token
 
 Published on GHCR: `ghcr.io/geut/sbx-shell-pi:node-24-factory`
 
@@ -45,6 +47,8 @@ Once that mixin is published, add it when you create the sandbox:
 sbx run --name factory ghcr.io/geut/sbx-shell-pi:node-24-factory /path/to/project \
   --kit ghcr.io/geut/sbx-kit-factory-dashboard:0.1.0
 ```
+
+The dashboard reaches the factory through its REST API. See [Factory server](#factory-server).
 
 Create a new sandbox to change the mixin set. A published set of the two images can come later. A set lists registry references, so it cannot point at a local kit directory.
 
@@ -94,6 +98,35 @@ Factory tips:
 - **Fresh** is the default editor (`$EDITOR`); run `fresh` in a Herdr pane to edit files, or let agents/tools like `git commit` open it automatically
 
 Further runs are simpler: list sandboxes (`sbx ls`) and run one (`sbx run [sandbox]`).
+
+### Factory server
+
+The factory server owns the controller; Pi and the dashboard are its clients ([factory-skills](https://github.com/geut/factory-skills#factory-server)). Set up the factory in the repository first, so `.factory/FACTORY.json` exists, then run this from the repository root in any Herdr pane:
+
+```bash
+factory-up
+```
+
+It does the following:
+
+1. Sets `server.host` to `0.0.0.0` in `FACTORY.json` when the host is missing, `127.0.0.1`, or `localhost`, because a published port never reaches the sandbox's loopback. Any other host stays as you set it, and `factory-up` warns that the published port cannot reach it. If a server is already running on the old host, `factory-up` asks you to stop it and run again.
+2. Opens a Herdr workspace named `factory` at the repository root and runs `factory serve` in it. The server refuses to start outside Herdr, and that workspace gets one tab per ticket. When a server already answers on `/health`, this step is skipped. After a restart, the server opens in a new tab of the existing `factory` workspace.
+3. Creates an `act` token for the `dashboard` client and writes it to `.factory/dashboard.env` (mode `0600`), next to Pi's `local.token`:
+
+   ```bash
+   FACTORY_API_URL=http://127.0.0.1:7731
+   FACTORY_API_TOKEN=...
+   ```
+
+   Tokens are shown only once, so `factory-up` keeps a token the server still accepts and replaces a revoked one. The dashboard's server calls the API with it; the token never reaches the browser.
+
+The kit publishes container port `7731` as `factory-api`. sbx picks the host port; see it with `sbx ports [sandbox]`. The server speaks plain HTTP. If you change `server.port`, the published port no longer matches.
+
+**Webhooks (optional).** To verify GitHub webhooks, the server needs the secret named by `codeHost.webhookSecretEnv` (for example `FACTORY_GITHUB_WEBHOOK_SECRET`). `factory-up` passes that variable from its own environment to the server's pane. sbx secrets reach the sandbox as placeholders that the proxy swaps on outbound requests, so they cannot verify an incoming signature. Export the real value in the pane before running `factory-up`:
+
+```bash
+FACTORY_GITHUB_WEBHOOK_SECRET=... factory-up
+```
 
 ## The Keys
 
