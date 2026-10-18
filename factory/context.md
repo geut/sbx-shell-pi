@@ -8,4 +8,4 @@ In bash, `npm` is an alias for `sfw npm` ([Socket Firewall Free](https://github.
 
 ## Factory server
 
-`factory-up`, run from the repository root, starts `factory serve` in a Herdr workspace named `factory` and writes the dashboard's API URL and token to `.factory/dashboard.env`. Running it again leaves a healthy server alone. Pi needs nothing from it: it reads `.factory/local.token` and the SQLite state directly.
+`factory-up`, run from the repository root, starts `factory serve` in a Herdr workspace named `factory` and writes the dashboard's API URL and token to `.factory/dashboard.env`. Running it again leaves a healthy server alone. Pi's `/factory` command comes from the factory-skills package and needs nothing from `factory-up`: it reads `.factory/local.token` and the SQLite state directly.

@@ -83,6 +83,10 @@ RUN case "$(dpkg --print-architecture)" in \
     && rm "${asset}" \
     && factory --help
 
+# factory-skills Pi package (the /factory command and stage skills), pinned to the same release as the binary
+RUN pi install "git:github.com/geut/factory-skills@v${FACTORY_VERSION}" \
+    && pi list | tee /dev/stderr | grep -F "git:github.com/geut/factory-skills@v${FACTORY_VERSION}"
+
 # factory-up starts `factory serve` in a Herdr workspace and writes the dashboard token
 COPY --chmod=0755 factory-up /usr/local/bin/factory-up
 

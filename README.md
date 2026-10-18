@@ -35,6 +35,7 @@ Published on GitHub Container Registry (GHCR):
 - [pi-herdr-subagents](https://github.com/modem-dev/pi-herdr-subagents) from `main`: `pi install` of `$HOME/.local/share/pi-herdr-subagents`, plus the bundled Herdr plugin linked and enabled. Example agent definitions are not copied; run `/subagents-init` inside pi if you want `worker`, `planner`, `scout`, and `reviewer`.
 - [Fresh](https://github.com/sinelaw/fresh) terminal IDE (Linux universal build), default editor (`EDITOR=fresh`)
 - `factory` from a [geut/factory-skills release](https://github.com/geut/factory-skills/releases) (`factory_version` kit arg, default `0.1.0`), checked against the release's `.sha256`
+- [factory-skills](https://github.com/geut/factory-skills) Pi package at the same release (`pi install git:github.com/geut/factory-skills@v<factory_version>`): the `/factory` command and the stage skills
 - `factory-up`, which starts the factory server and creates the dashboard's token
 
 Published on GHCR: `ghcr.io/geut/sbx-shell-pi:node-24-factory`
