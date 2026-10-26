@@ -2,23 +2,23 @@
 schemaVersion: "3"
 kind: workload
 displayName: pi factory
-description: Herdr session with pi, Fresh, and an in-sandbox Docker daemon on Node 24 or newer
+description: Herdr session with pi, Fresh, Hunk, and an in-sandbox Docker daemon on Node 24
 
 provides:
-  - "node@${{ kit.args.node_version }}"
+  - "node@24"
   - "pi-factory@1"
 
 args:
-  node_version:
-    default: "24.20.0"
-    pattern: '^([2-9][4-9]|[3-9][0-9])\.[0-9]+\.[0-9]+$'
-    description: Node.js version to install (24 or newer)
-    buildArg: NODE_VERSION
   pi_version:
     default: latest
     pattern: '^(latest|[0-9]+\.[0-9]+\.[0-9]+)$'
     description: npm dist-tag or version of @earendil-works/pi-coding-agent
     buildArg: PI_VERSION
+  hunk_version:
+    default: "0.24.1"
+    pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'
+    description: modem-dev/hunk release that provides the hunk binary
+    buildArg: HUNK_VERSION
   factory_version:
     default: "0.1.0"
     pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'

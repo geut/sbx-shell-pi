@@ -4,13 +4,13 @@ v3 sandbox kits for running [pi](https://pi.dev) inside Docker Sandboxes (`[sbx]
 
 ---
 
-> Docker Sandboxes (`sbx`) are a nice way to run coding agents with a bit more isolation and a bit less YOLO. These kits install pi on Node.js 24 or newer and launch it as the workload, instead of as a template under the built-in `shell` agent.
+> Docker Sandboxes (`sbx`) are a nice way to run coding agents with a bit more isolation and a bit less YOLO. These kits install pi on the latest Node.js 24.x and launch it as the workload, instead of as a template under the built-in `shell` agent.
 
 ## The kits
 
 ### Single-pi kits
 
-[pi/](./pi/) extends the `shell` template, installs Node 24 or newer, installs `pi`, and launches `pi`.
+[pi/](./pi/) extends the `shell` template, installs the latest Node.js 24.x, installs `pi`, and launches `pi`.
 
 [pi-docker/](./pi-docker/) is the same kit on the [shell-docker](https://hub.docker.com/layers/docker/sandbox-templates/shell-docker/images/) template. With this kit, the agent has access to **its own docker daemon**.
 
@@ -26,7 +26,7 @@ Published on GitHub Container Registry (GHCR):
 **Includes:**
 
 - `docker/sandbox-templates:shell-docker` base (in-sandbox Docker daemon + sbx agent user)
-- Node.js 24 or newer from [nodejs.org prebuilt binaries](https://nodejs.org/dist/) (`node_version` kit arg, default `24.20.0`)
+- Latest Node.js 24.x from [nodejs.org/dist/latest-v24.x](https://nodejs.org/dist/latest-v24.x/) (the build checks the major version and the tarball against `SHASUMS256.txt`)
 - [pi](https://pi.dev) coding agent
 - [Socket Firewall Free](https://github.com/SocketDev/sfw-free/) (`npm` in bash runs `sfw npm`)
 - [Herdr](https://herdr.dev) terminal multiplexer
@@ -34,13 +34,14 @@ Published on GitHub Container Registry (GHCR):
 - Official Herdr agent skill (`npx skills add herdrdev/herdr --skill herdr -g`)
 - [pi-herdr-subagents](https://github.com/modem-dev/pi-herdr-subagents) from `main`: `pi install` of `$HOME/.local/share/pi-herdr-subagents`, plus the bundled Herdr plugin linked and enabled. Example agent definitions are not copied; run `/subagents-init` inside pi if you want `worker`, `planner`, `scout`, and `reviewer`.
 - [Fresh](https://github.com/sinelaw/fresh) terminal IDE (Linux universal build), default editor (`EDITOR=fresh`)
+- [Hunk](https://github.com/modem-dev/hunk) diff viewer (`hunk_version` kit arg, default `0.24.1`), on PATH for the handoff diff, including non-interactive pane scripts. The `hunk-review` skill is installed for pi. Fresh stays `$EDITOR`.
 - `factory` from a [geut/factory-skills release](https://github.com/geut/factory-skills/releases) (`factory_version` kit arg, default `0.1.0`), checked against the release's `.sha256`
 - [factory-skills](https://github.com/geut/factory-skills) Pi package at the same release (`pi install git:github.com/geut/factory-skills@v<factory_version>`): the `/factory` command and the stage skills
 - `factory-up`, which starts the factory server and creates the dashboard's token
 
 Published on GHCR: `ghcr.io/geut/sbx-shell-pi:node-24-factory`
 
-The factory workload provides `node` at the installed `node_version` and `pi-factory@1`. The single-pi kits do not provide those names. A [factory-dashboard](https://github.com/dpaez/factory-dashboard) mixin that requires `node >= 24` and `pi-factory >= 1` composes only onto this workload. Herdr stays the entrypoint. The dashboard runs beside it and reads the project’s `.factory/db/state.sqlite`.
+The factory workload provides `node@24` and `pi-factory@1`. The image installs whatever [nodejs.org/dist/latest-v24.x](https://nodejs.org/dist/latest-v24.x/) is at build time. The single-pi kits do not provide those names. A [factory-dashboard](https://github.com/dpaez/factory-dashboard) mixin that requires `node >= 24` and `pi-factory >= 1` composes only onto this workload. Herdr stays the entrypoint. The dashboard runs beside it and reads the project’s `.factory/db/state.sqlite`.
 
 Once that mixin is published, add it when you create the sandbox:
 
@@ -97,6 +98,7 @@ Factory tips:
 - Detach with Herdr prefix `ctrl+b` then `q` — agents keep running ([Herdr quick start](https://herdr.dev/docs/quick-start/))
 - Reattach by running `sbx run [sandbox]` again
 - **Fresh** is the default editor (`$EDITOR`); run `fresh` in a Herdr pane to edit files, or let agents/tools like `git commit` open it automatically
+- **Hunk** is on PATH for the handoff diff (`hunk diff …`). Fresh stays `$EDITOR`
 
 Further runs are simpler: list sandboxes (`sbx ls`) and run one (`sbx run [sandbox]`).
 
@@ -155,16 +157,6 @@ docker buildx build ./pi-docker -f ./pi-docker/pi-docker.yaml \
 docker buildx build ./factory -f ./factory/factory.yaml \
   --platform linux/amd64,linux/arm64 \
   -t ghcr.io/geut/sbx-shell-pi:node-24-factory --push
-```
-
-Override the Node version with the kit argument name (`node_version`, not `NODE_VERSION`). The value must be 24 or newer:
-
-```bash
-docker buildx build ./factory -f ./factory/factory.yaml \
-  --platform linux/amd64,linux/arm64 \
-  --build-arg node_version=24.20.0 \
-  -t ghcr.io/geut/sbx-shell-pi:node-24-factory \
-  --push
 ```
 
 ## Acknowledgements

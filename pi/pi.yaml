@@ -2,14 +2,9 @@
 schemaVersion: "3"
 kind: workload
 displayName: pi
-description: pi coding agent on Node 24 or newer, with Socket Firewall in front of npm
+description: pi coding agent on Node 24, with Socket Firewall in front of npm
 
 args:
-  node_version:
-    default: "24.20.0"
-    pattern: '^([2-9][4-9]|[3-9][0-9])\.[0-9]+\.[0-9]+$'
-    description: Node.js version to install (24 or newer)
-    buildArg: NODE_VERSION
   pi_version:
     default: latest
     pattern: '^(latest|[0-9]+\.[0-9]+\.[0-9]+)$'

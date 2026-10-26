@@ -1,8 +1,8 @@
 ## Sandbox
 
-Herdr is the session. Split panes and run `pi` in each one. Fresh is `$EDITOR`.
+Herdr is the session. Split panes and run `pi` in each one. Fresh is `$EDITOR`. `hunk` is on PATH for the handoff diff.
 
-Node.js 24 or newer is installed. `pi` and `factory` are on PATH. Docker is available inside the sandbox.
+Node.js is the latest 24.x from <https://nodejs.org/dist/latest-v24.x/>. `pi`, `factory`, and `hunk` are on PATH. Docker is available inside the sandbox.
 
 In bash, `npm` is an alias for `sfw npm` ([Socket Firewall Free](https://github.com/SocketDev/sfw-free/)). Running the `npm` binary directly does not go through the firewall.
 

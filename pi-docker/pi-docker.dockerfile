@@ -1,11 +1,11 @@
 FROM docker/sandbox-templates:shell-docker
 
-ARG NODE_VERSION=24.20.0
 ARG PI_VERSION=latest
 
 USER root
 
-# Install Node.js from official prebuilt binaries (version overridable via --build-arg)
+# Latest Node.js 24.x. The tarball name includes the version, so the
+# checksum list selects it: https://nodejs.org/dist/latest-v24.x/
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl xz-utils \
     && ARCH="$(dpkg --print-architecture)" \
@@ -14,11 +14,15 @@ RUN apt-get update \
          arm64) NODE_ARCH="arm64" ;; \
          *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; \
        esac \
-    && curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" \
-         -o /tmp/node.tar.xz \
-    && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
-    && rm /tmp/node.tar.xz \
+    && curl -fsSL https://nodejs.org/dist/latest-v24.x/SHASUMS256.txt -o /tmp/node-SHASUMS256.txt \
+    && NODE_TARBALL="$(grep -E "node-v[0-9.]+-linux-${NODE_ARCH}\\.tar\\.xz$" /tmp/node-SHASUMS256.txt | awk '{ print $2 }')" \
+    && [ -n "$NODE_TARBALL" ] && [ "$(printf '%s\n' "$NODE_TARBALL" | wc -l)" -eq 1 ] \
+    && curl -fsSL "https://nodejs.org/dist/latest-v24.x/${NODE_TARBALL}" -o "/tmp/${NODE_TARBALL}" \
+    && grep -F " ${NODE_TARBALL}" /tmp/node-SHASUMS256.txt | (cd /tmp && sha256sum -c -) \
+    && tar -xJf "/tmp/${NODE_TARBALL}" -C /usr/local --strip-components=1 \
+    && rm -f "/tmp/${NODE_TARBALL}" /tmp/node-SHASUMS256.txt \
     && node --version && npm --version \
+    && node -e 'const major = Number(process.versions.node.split(".")[0]); if (major !== 24) { console.error("node 24.x required, found " + process.versions.node); process.exit(1); }' \
     && apt-get purge -y xz-utils \
     && apt-get autoremove -y \
     && apt-get clean \

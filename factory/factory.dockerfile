@@ -1,12 +1,13 @@
 FROM docker/sandbox-templates:shell-docker
 
-ARG NODE_VERSION=24.20.0
 ARG PI_VERSION=latest
 ARG FACTORY_VERSION=0.1.0
+ARG HUNK_VERSION=0.24.1
 
 USER root
 
-# Install Node.js from official prebuilt binaries (version overridable via --build-arg)
+# Latest Node.js 24.x. The tarball name includes the version, so the
+# checksum list selects it: https://nodejs.org/dist/latest-v24.x/
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl xz-utils \
     && ARCH="$(dpkg --print-architecture)" \
@@ -15,11 +16,15 @@ RUN apt-get update \
          arm64) NODE_ARCH="arm64" ;; \
          *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; \
        esac \
-    && curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz" \
-         -o /tmp/node.tar.xz \
-    && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
-    && rm /tmp/node.tar.xz \
+    && curl -fsSL https://nodejs.org/dist/latest-v24.x/SHASUMS256.txt -o /tmp/node-SHASUMS256.txt \
+    && NODE_TARBALL="$(grep -E "node-v[0-9.]+-linux-${NODE_ARCH}\\.tar\\.xz$" /tmp/node-SHASUMS256.txt | awk '{ print $2 }')" \
+    && [ -n "$NODE_TARBALL" ] && [ "$(printf '%s\n' "$NODE_TARBALL" | wc -l)" -eq 1 ] \
+    && curl -fsSL "https://nodejs.org/dist/latest-v24.x/${NODE_TARBALL}" -o "/tmp/${NODE_TARBALL}" \
+    && grep -F " ${NODE_TARBALL}" /tmp/node-SHASUMS256.txt | (cd /tmp && sha256sum -c -) \
+    && tar -xJf "/tmp/${NODE_TARBALL}" -C /usr/local --strip-components=1 \
+    && rm -f "/tmp/${NODE_TARBALL}" /tmp/node-SHASUMS256.txt \
     && node --version && npm --version \
+    && node -e 'const major = Number(process.versions.node.split(".")[0]); if (major !== 24) { console.error("node 24.x required, found " + process.versions.node); process.exit(1); }' \
     && apt-get purge -y xz-utils \
     && apt-get autoremove -y \
     && apt-get clean \
@@ -32,7 +37,7 @@ RUN printf '\n# Socket Firewall alias for non-interactive bash\nshopt -s expand_
 
 USER agent
 
-ENV PATH="/home/agent/.npm-global/bin:/home/agent/.local/bin:${PATH}" \
+ENV PATH="/home/agent/.hunk/bin:/home/agent/.npm-global/bin:/home/agent/.local/bin:${PATH}" \
     EDITOR=fresh
 
 # agent-local npm "global" installs
@@ -49,6 +54,15 @@ RUN printf '\n# Fresh editor\nexport PATH="$HOME/.local/bin:$PATH"\nexport EDITO
     && curl -fsSL https://raw.githubusercontent.com/sinelaw/fresh/refs/heads/master/scripts/install.sh \
          | sh -s -- --no-desktop-integration \
     && fresh --version
+
+# Hunk diff viewer (standalone binary). Default install dir keeps bundled skills
+# beside the binary. ENV PATH is what non-interactive pane scripts inherit.
+RUN curl -fsSL https://hunk.dev/install.sh \
+      | HUNK_VERSION="${HUNK_VERSION}" HUNK_NO_MODIFY_PATH=1 HUNK_DISABLE_ANALYTICS=1 sh \
+    && printf '\n# Hunk diff viewer\nexport PATH="$HOME/.hunk/bin:$PATH"\n' >> ~/.bashrc \
+    && hunk --version \
+    && bash -c 'command -v hunk' \
+    && npx --yes skills add modem-dev/hunk --skill hunk-review -g -y --agent pi --copy
 
 # Herdr + pi integration + agent skill
 RUN printf '\n# Herdr installer path\nexport PATH="$HOME/.local/bin:$PATH"\n' >> ~/.bashrc \
