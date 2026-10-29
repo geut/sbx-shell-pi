@@ -26,6 +26,7 @@ Published on GitHub Container Registry (GHCR):
 **Includes:**
 
 - `docker/sandbox-templates:shell-docker` base (in-sandbox Docker daemon + sbx agent user)
+- Official [GitHub CLI](https://cli.github.com/) (`gh`) from the Debian `stable` repository
 - Latest Node.js 24.x from [nodejs.org/dist/latest-v24.x](https://nodejs.org/dist/latest-v24.x/) (the build checks the major version and the tarball against `SHASUMS256.txt`)
 - [pi](https://pi.dev) coding agent
 - [Socket Firewall Free](https://github.com/SocketDev/sfw-free/) (`npm` in bash runs `sfw npm`)

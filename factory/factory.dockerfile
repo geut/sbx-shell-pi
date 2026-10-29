@@ -30,6 +30,20 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# Official GitHub CLI (stable). Replaces the base image's Ubuntu gh package.
+# https://github.com/cli/cli/blob/trunk/docs/install_linux.md#debian
+RUN mkdir -p -m 755 /etc/apt/keyrings /etc/apt/sources.list.d \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+         -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && printf 'deb [arch=%s signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\n' \
+         "$(dpkg --print-architecture)" > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends gh \
+    && gh --version \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 # Non-interactive bash reads BASH_ENV, not ~/.bashrc. The shell template
 # points BASH_ENV at this file.
 RUN printf '\n# Socket Firewall alias for non-interactive bash\nshopt -s expand_aliases\nalias npm="sfw npm"\n' \

@@ -39,6 +39,7 @@ capabilities:
           - registry.npmjs.org
           - github.com
           - api.github.com
+          - cli.github.com
           - codeload.github.com
           - raw.githubusercontent.com
           - objects.githubusercontent.com
