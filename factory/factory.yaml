@@ -4,9 +4,11 @@ kind: workload
 displayName: pi factory
 description: Herdr session with pi, Fresh, Hunk, and an in-sandbox Docker daemon on Node 24
 
+# io.github.geut/pi-factory@1 is the contract mixins build on; see "Factory
+# contract" in the README. Bump the major version when it breaks.
 provides:
   - "node@24"
-  - "pi-factory@1"
+  - "io.github.geut/pi-factory@1"
 
 args:
   pi_version:

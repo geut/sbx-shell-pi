@@ -42,22 +42,35 @@ Published on GitHub Container Registry (GHCR):
 
 Published on GHCR: `ghcr.io/geut/sbx-shell-pi:node-24-factory`
 
-The factory workload provides `node@24` and `pi-factory@1`. The image installs whatever [nodejs.org/dist/latest-v24.x](https://nodejs.org/dist/latest-v24.x/) is at build time. The single-pi kits do not provide those names. A [factory-dashboard](https://github.com/dpaez/factory-dashboard) mixin that requires `node >= 24` and `pi-factory >= 1` composes only onto this workload. Herdr stays the entrypoint. The dashboard runs beside it and reads the project’s `.factory/db/state.sqlite`.
+#### Factory contract
+
+The factory workload provides `node@24` and `io.github.geut/pi-factory@1`. The image installs whatever [nodejs.org/dist/latest-v24.x](https://nodejs.org/dist/latest-v24.x/) is at build time. The single-pi kits provide neither name, so a mixin that requires them composes only onto this workload.
+
+A mixin that requires `io.github.geut/pi-factory >= 1` can rely on the following:
+
+- `factory` and `factory-up` are on `PATH` for the `agent` user, in non-interactive shells too.
+- Herdr is the entrypoint. `factory serve` runs in a Herdr pane, which `factory-up` opens.
+- The factory server listens on container port `7731`, and the kit publishes that port as `factory-api`. `factory-up` makes the server listen on `0.0.0.0`.
+- `factory-up` writes `.factory/dashboard.env` (mode `0600`) at the repository root, with `FACTORY_API_URL`, reachable from inside the sandbox, and `FACTORY_API_TOKEN`, an `act` token for the `dashboard` client. It replaces the file only when the server rejects the token. For the sandbox's own repository, the file is `$WORKSPACE_DIR/.factory/dashboard.env`.
+
+A change that breaks any of these bumps the major version. The name uses the `io.github.geut/` namespace because bare names belong to Docker's `com.docker.kit/` vocabulary.
+
+#### Dashboard
+
+[factory-dashboard](https://github.com/dpaez/factory-dashboard) is a mixin that requires `node >= 24` and `io.github.geut/pi-factory >= 1`. Herdr stays the entrypoint. The dashboard runs beside it and reads the factory through the server's REST API, with the URL and token from `.factory/dashboard.env`. See [Factory server](#factory-server).
 
 Once that mixin is published, add it when you create the sandbox:
 
 ```bash
 sbx run --name factory ghcr.io/geut/sbx-shell-pi:node-24-factory /path/to/project \
-  --kit ghcr.io/geut/sbx-kit-factory-dashboard:0.1.0
+  --kit ghcr.io/dpaez/sbx-kit-factory-dashboard:0.1.0
 ```
-
-The dashboard reaches the factory through its REST API. See [Factory server](#factory-server).
 
 Create a new sandbox to change the mixin set. A published set of the two images can come later. A set lists registry references, so it cannot point at a local kit directory.
 
 ## Usage
 
-1. Install `sbx` 0.45 or newer: [https://docs.docker.com/ai/sandboxes/](https://docs.docker.com/ai/sandboxes/)
+1. Install `sbx` 0.47 or newer: [https://docs.docker.com/ai/sandboxes/](https://docs.docker.com/ai/sandboxes/)
 2. Set your custom secret, usually the provider key. 
 ```bash
 sbx secret set-custom --sandbox [SANDBOX_NAME] --host [provider.endpoint] --env [API_KEY_NAME] --value [SECRET]
