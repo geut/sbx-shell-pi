@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# Starts the factory server for a repository in its own Herdr workspace, then
+# writes the dashboard's API URL and token to .factory/dashboard.env.
+# Safe to run again: a healthy server is left alone, and a token that still
+# works is kept.
+set -euo pipefail
+
+usage="Usage: factory-up [repository]   (default: the current directory)"
+case "${1:-}" in
+  -h | --help) echo "$usage"; exit 0 ;;
+esac
+
+root="$(git -C "${1:-$PWD}" rev-parse --show-toplevel 2>/dev/null || (cd "${1:-$PWD}" && pwd))"
+config="$root/.factory/FACTORY.json"
+env_file="$root/.factory/dashboard.env"
+
+if [ ! -f "$config" ]; then
+  echo "No $config. Set up the factory for this repository first." >&2
+  exit 1
+fi
+
+# The server binds server.host from FACTORY.json, 127.0.0.1 by default. A
+# published port reaches the sandbox on eth0, never its loopback, so replace a
+# missing or loopback host with 0.0.0.0. Any other host stays as it is.
+read -r host port webhook_env changed < <(node -e '
+  const fs = require("node:fs");
+  const file = process.argv[1];
+  const config = JSON.parse(fs.readFileSync(file, "utf8"));
+  const server = config.server ?? {};
+  const loopback = [undefined, "127.0.0.1", "localhost"].includes(server.host);
+  if (loopback) {
+    config.server = { ...server, host: "0.0.0.0" };
+    fs.writeFileSync(file, JSON.stringify(config, null, 2) + "\n");
+    console.error(`Set server.host to 0.0.0.0 in ${file} so the published port reaches the server.`);
+  }
+  console.log(config.server.host, config.server.port ?? 7731, config.codeHost?.webhookSecretEnv ?? "-", loopback ? 1 : 0);
+' "$config")
+
+if [ "$host" != "0.0.0.0" ] && [ "$host" != "::" ]; then
+  echo "Warning: server.host is $host, so the published port cannot reach the server. Set it to 0.0.0.0 in $config." >&2
+fi
+case "$host" in
+  0.0.0.0 | ::) connect=127.0.0.1 ;;
+  *) connect="$host" ;;
+esac
+url="http://$connect:$port"
+
+healthy() { curl -fsS --max-time 2 "$url/health" >/dev/null 2>&1; }
+
+if healthy; then
+  echo "Factory server already answers at $url."
+  if [ "$changed" = 1 ]; then
+    echo "It still listens on the old host. Stop it (Ctrl-C in its pane in the factory workspace), then run factory-up again." >&2
+  fi
+else
+  # The webhook secret reaches the server through its pane's environment.
+  env_args=()
+  if [ "$webhook_env" != "-" ] && [ -n "${!webhook_env:-}" ]; then
+    env_args=(--env "$webhook_env=${!webhook_env}")
+  fi
+  # factory serve must run inside a Herdr pane; its workspace becomes the
+  # factory workspace, with one tab per ticket. After a restart, open a new
+  # tab in the factory workspace that already holds this repository's tickets.
+  workspace="$(herdr workspace list | node -e '
+    const root = process.argv[1];
+    const listPanes = require("node:child_process").execFileSync("herdr", ["pane", "list"], { encoding: "utf8" });
+    const panes = JSON.parse(listPanes).result.panes;
+    let s = "";
+    process.stdin.on("data", (d) => (s += d)).on("end", () => {
+      const match = JSON.parse(s).result.workspaces.find(
+        (w) => w.label === "factory" && panes.some((p) => p.workspace_id === w.workspace_id && p.cwd === root),
+      );
+      console.log(match?.workspace_id ?? "");
+    });
+  ' "$root")"
+  if [ -n "$workspace" ]; then
+    created="$(herdr tab create --workspace "$workspace" --cwd "$root" --label server --no-focus "${env_args[@]}")"
+  else
+    created="$(herdr workspace create --cwd "$root" --label factory --no-focus "${env_args[@]}")"
+  fi
+  pane="$(node -e 'console.log(JSON.parse(process.argv[1]).result.root_pane.pane_id)' "$created")"
+  herdr pane run "$pane" "factory serve"
+  for _ in $(seq 1 30); do
+    healthy && break
+    sleep 1
+  done
+  if ! healthy; then
+    echo "The factory server did not answer at $url within 30 s. Check the factory workspace in Herdr (pane $pane)." >&2
+    exit 1
+  fi
+  echo "Factory server listening at $url (Herdr pane $pane)."
+fi
+
+# Tokens are shown once, so keep the dashboard's in the factory root next to
+# local.token. Replace it only when the server no longer accepts it.
+if [ -f "$env_file" ]; then
+  token="$(sed -n 's/^FACTORY_API_TOKEN=//p' "$env_file")"
+  if [ -n "$token" ] && curl -fsS --max-time 2 -H "Authorization: Bearer $token" "$url/v1/me" >/dev/null 2>&1; then
+    echo "Dashboard token in $env_file still works."
+    exit 0
+  fi
+fi
+(cd "$root" && factory token revoke dashboard >/dev/null 2>&1) || true
+token="$(cd "$root" && factory token create dashboard --scope act 2>/dev/null)"
+(
+  umask 077
+  printf 'FACTORY_API_URL=%s\nFACTORY_API_TOKEN=%s\n' "$url" "$token" > "$env_file"
+)
+echo "Wrote the dashboard's API URL and act token to $env_file."

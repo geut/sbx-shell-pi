@@ -1,108 +1,178 @@
 # sbx-shell-pi
 
-Custom template images for running [pi](https://pi.dev) inside Docker Sandboxes ([`sbx`](https://docs.docker.com/reference/cli/sbx/)). Includes single-pi sandboxes and a **factory** variant where multiple pi sessions collaborate via [Herdr](https://herdr.dev).
-___
+v3 sandbox kits for running [pi](https://pi.dev) inside Docker Sandboxes (`[sbx](https://docs.docker.com/ai/sandboxes/)`). Includes single-pi sandboxes and a **factory** kit where multiple pi sessions collaborate via [Herdr](https://herdr.dev).
 
-> Docker Sandboxes (`sbx`) are a nice way to run coding agents with a bit more isolation and a bit less YOLO. There’s no “official” support for pi yet (see supported agents [`sbx create` docs](https://docs.docker.com/reference/cli/sbx/create/)), but it’s easy to add via a custom template image.
+---
 
-**Note**: Docker also has a `docker sandbox` command that overlaps with `sbx`, but it seems to lag behind in features. I recommend sticking to `sbx`. This FAQ section was especially useful for passing custom environment variables: [How do I set custom environment variables inside a sandbox?](https://docs.docker.com/ai/sandboxes/faq/#how-do-i-set-custom-environment-variables-inside-a-sandbox).
+> Docker Sandboxes (`sbx`) are a nice way to run coding agents with a bit more isolation and a bit less YOLO. These kits install pi on the latest Node.js 24.x and launch it as the workload, instead of as a template under the built-in `shell` agent.
 
+## The kits
 
-## The Images
+### Single-pi kits
 
-### Single-pi images
+[pi/](./pi/) extends the `shell` template, installs the latest Node.js 24.x, installs `pi`, and launches `pi`.
 
-The [Dockerfile](./Dockerfile) extends the `shell` template, installs Node 24, installs `pi`, and tweaks `~/.bashrc` to auto-launch `pi` in interactive shells.
-
-There is also a [Dockerfile.shell-docker](./Dockerfile.shell-docker) file whose only difference is that it uses the [shell-docker](https://hub.docker.com/layers/docker/sandbox-templates/shell-docker/images/) image. With this image, the agent has access to **its own docker daemon**.
+[pi-docker/](./pi-docker/) is the same kit on the [shell-docker](https://hub.docker.com/layers/docker/sandbox-templates/shell-docker/images/) template. With this kit, the agent has access to **its own docker daemon**.
 
 Published on GitHub Container Registry (GHCR):
+
 - `ghcr.io/geut/sbx-shell-pi:node24`
 - `ghcr.io/geut/sbx-shell-pi:node24-docker`
 
-### Factory image
+### Factory kit 🏭
 
-The [Dockerfile.factory](./Dockerfile.factory) extends `shell-docker` and is the first step toward a **factory sandbox** — multiple pi sessions working together on planning, implementing, reviewing, and testing.
+[factory/](./factory/) extends `shell-docker`. Herdr is the entrypoint: split panes and run `pi` in each one.
 
 **Includes:**
+
 - `docker/sandbox-templates:shell-docker` base (in-sandbox Docker daemon + sbx agent user)
-- Node.js v24 from [nodejs.org prebuilt binaries](https://nodejs.org/dist/) (`NODE_VERSION` build arg, default latest v24)
+- Official [GitHub CLI](https://cli.github.com/) (`gh`) from the Debian `stable` repository
+- Latest Node.js 24.x from [nodejs.org/dist/latest-v24.x](https://nodejs.org/dist/latest-v24.x/) (the build checks the major version and the tarball against `SHASUMS256.txt`)
 - [pi](https://pi.dev) coding agent
+- [Socket Firewall Free](https://github.com/SocketDev/sfw-free/) (`npm` in bash runs `sfw npm`)
 - [Herdr](https://herdr.dev) terminal multiplexer
 - `herdr integration install pi` (native pi lifecycle and session reporting in Herdr)
 - Official Herdr agent skill (`npx skills add herdrdev/herdr --skill herdr -g`)
+- [pi-herdr-subagents](https://github.com/modem-dev/pi-herdr-subagents) from `main`: `pi install` of `$HOME/.local/share/pi-herdr-subagents`, plus the bundled Herdr plugin linked and enabled. Example agent definitions are not copied; run `/subagents-init` inside pi if you want `worker`, `planner`, `scout`, and `reviewer`.
 - [Fresh](https://github.com/sinelaw/fresh) terminal IDE (Linux universal build), default editor (`EDITOR=fresh`)
-- Auto-launches Herdr on interactive shell entry (start `pi` inside Herdr panes)
+- [Hunk](https://github.com/modem-dev/hunk) diff viewer (`hunk_version` kit arg, default `0.24.1`), on PATH for the handoff diff, including non-interactive pane scripts. The `hunk-review` skill is installed for pi. Fresh stays `$EDITOR`.
+- `factory` from a [geut/factory-skills release](https://github.com/geut/factory-skills/releases) (`factory_version` kit arg, default `0.1.0`), checked against the release's `.sha256`
+- [factory-skills](https://github.com/geut/factory-skills) Pi package at the same release (`pi install git:github.com/geut/factory-skills@v<factory_version>`): the `/factory` command and the stage skills
+- `factory-up`, which starts the factory server and creates the dashboard's token
 
 Published on GHCR: `ghcr.io/geut/sbx-shell-pi:node-24-factory`
 
-## Usage
+#### Factory contract
 
-1. Install `sbx`: https://docs.docker.com/ai/sandboxes/
+The factory workload provides `node@24` and `io.github.geut/pi-factory@1`. The image installs whatever [nodejs.org/dist/latest-v24.x](https://nodejs.org/dist/latest-v24.x/) is at build time. The single-pi kits provide neither name, so a mixin that requires them composes only onto this workload.
 
-2. Run a template image
+A mixin that requires `io.github.geut/pi-factory >= 1` can rely on the following:
 
-**Single pi (default shell template):**
+- `factory` and `factory-up` are on `PATH` for the `agent` user, in non-interactive shells too.
+- Herdr is the entrypoint. `factory serve` runs in a Herdr pane, which `factory-up` opens.
+- The factory server listens on container port `7731`, and the kit publishes that port as `factory-api`. `factory-up` makes the server listen on `0.0.0.0`.
+- `factory-up` writes `.factory/dashboard.env` (mode `0600`) at the repository root, with `FACTORY_API_URL`, reachable from inside the sandbox, and `FACTORY_API_TOKEN`, an `act` token for the `dashboard` client. It replaces the file only when the server rejects the token. For the sandbox's own repository, the file is `$WORKSPACE_DIR/.factory/dashboard.env`.
+
+A change that breaks any of these bumps the major version. The name uses the `io.github.geut/` namespace because bare names belong to Docker's `com.docker.kit/` vocabulary.
+
+#### Dashboard
+
+[factory-dashboard](https://github.com/dpaez/factory-dashboard) is a mixin that requires `node >= 24` and `io.github.geut/pi-factory >= 1`. Herdr stays the entrypoint. The dashboard runs beside it and reads the factory through the server's REST API, with the URL and token from `.factory/dashboard.env`. See [Factory server](#factory-server).
+
+Once that mixin is published, add it when you create the sandbox:
 
 ```bash
-sbx run -t ghcr.io/geut/sbx-shell-pi:node24 shell [PROJECT_DIR]
+sbx run --name factory ghcr.io/geut/sbx-shell-pi:node-24-factory /path/to/project \
+  --kit ghcr.io/dpaez/sbx-kit-factory-dashboard:0.1.0
+```
+
+Create a new sandbox to change the mixin set. A published set of the two images can come later. A set lists registry references, so it cannot point at a local kit directory.
+
+## Usage
+
+1. Install `sbx` 0.47 or newer: [https://docs.docker.com/ai/sandboxes/](https://docs.docker.com/ai/sandboxes/)
+2. Set your custom secret, usually the provider key. 
+```bash
+sbx secret set-custom --sandbox [SANDBOX_NAME] --host [provider.endpoint] --env [API_KEY_NAME] --value [SECRET]
+```
+3. Run a kit
+
+**Single pi:**
+
+```bash
+sbx run --name pi ghcr.io/geut/sbx-shell-pi:node24 [PROJECT_DIR]
 ```
 
 **Single pi with in-sandbox Docker daemon:**
 
 ```bash
-sbx run -t ghcr.io/geut/sbx-shell-pi:node24-docker shell [PROJECT_DIR]
+sbx run --name pi-docker ghcr.io/geut/sbx-shell-pi:node24-docker [PROJECT_DIR]
 ```
 
 **Factory — Herdr orchestrates multiple pi panes (with Docker for testing):**
 
 ```bash
-sbx run -t ghcr.io/geut/sbx-shell-pi:node-24-factory shell [PROJECT_DIR]
+sbx run --name factory ghcr.io/geut/sbx-shell-pi:node-24-factory [PROJECT_DIR]
 ```
 
-This loads the template image and starts the sandbox. Single-pi images auto-launch `pi`; the factory image auto-launches **Herdr**. Split panes in Herdr and run `pi` in each one for parallel agents (plan, implement, review, test).
+From a checkout of this repo, pass the kit directory instead of the image:
+
+```bash
+sbx run --name pi ./pi [PROJECT_DIR]
+sbx run --name pi-docker ./pi-docker [PROJECT_DIR]
+sbx run --name factory ./factory [PROJECT_DIR]
+```
+
+`sbx` builds that directory with the OCI exporter. Docker Desktop’s default Buildx driver cannot do that export. Use a `docker-container` builder, or turn on the containerd image store, before running a local kit directory. A published image does not need that builder.
+
+Single-pi kits open `pi`. The factory kit opens **Herdr**. Split panes in Herdr and run `pi` in each one for parallel agents (plan, implement, review, test).
 
 Factory tips:
+
 - Detach with Herdr prefix `ctrl+b` then `q` — agents keep running ([Herdr quick start](https://herdr.dev/docs/quick-start/))
 - Reattach by running `sbx run [sandbox]` again
 - **Fresh** is the default editor (`$EDITOR`); run `fresh` in a Herdr pane to edit files, or let agents/tools like `git commit` open it automatically
+- **Hunk** is on PATH for the handoff diff (`hunk diff …`). Fresh stays `$EDITOR`
 
 Further runs are simpler: list sandboxes (`sbx ls`) and run one (`sbx run [sandbox]`).
 
+### Factory server
+
+The factory server owns the controller; Pi and the dashboard are its clients ([factory-skills](https://github.com/geut/factory-skills#factory-server)). Set up the factory in the repository first, so `.factory/FACTORY.json` exists, then run this from the repository root in any Herdr pane:
+
+```bash
+factory-up
+```
+
+It does the following:
+
+1. Sets `server.host` to `0.0.0.0` in `FACTORY.json` when the host is missing, `127.0.0.1`, or `localhost`, because a published port never reaches the sandbox's loopback. Any other host stays as you set it, and `factory-up` warns that the published port cannot reach it. If a server is already running on the old host, `factory-up` asks you to stop it and run again.
+2. Opens a Herdr workspace named `factory` at the repository root and runs `factory serve` in it. The server refuses to start outside Herdr, and that workspace gets one tab per ticket. When a server already answers on `/health`, this step is skipped. After a restart, the server opens in a new tab of the existing `factory` workspace.
+3. Creates an `act` token for the `dashboard` client and writes it to `.factory/dashboard.env` (mode `0600`), next to Pi's `local.token`:
+
+   ```bash
+   FACTORY_API_URL=http://127.0.0.1:7731
+   FACTORY_API_TOKEN=...
+   ```
+
+   Tokens are shown only once, so `factory-up` keeps a token the server still accepts and replaces a revoked one. The dashboard's server calls the API with it; the token never reaches the browser.
+
+The kit publishes container port `7731` as `factory-api`. sbx picks the host port; see it with `sbx ports [sandbox]`. The server speaks plain HTTP. If you change `server.port`, the published port no longer matches.
+
+**Webhooks (optional).** To verify GitHub webhooks, the server needs the secret named by `codeHost.webhookSecretEnv` (for example `FACTORY_GITHUB_WEBHOOK_SECRET`). `factory-up` passes that variable from its own environment to the server's pane. sbx secrets reach the sandbox as placeholders that the proxy swaps on outbound requests, so they cannot verify an incoming signature. Export the real value in the pane before running `factory-up`:
+
+```bash
+FACTORY_GITHUB_WEBHOOK_SECRET=... factory-up
+```
+
 ## The Keys
 
-How you provide credentials depends on the model/provider. For Claude/Codex and many others, sbx secret is a good starting point: https://docs.docker.com/reference/cli/sbx/secret/.
+How you provide credentials depends on the model/provider. For Claude/Codex and many others, sbx secret is a good starting point: [https://docs.docker.com/reference/cli/sbx/secret/](https://docs.docker.com/reference/cli/sbx/secret/). Use [set-custom](https://docs.docker.com/reference/cli/sbx/secret/set-custom/) for other providers.
 
-In my case, I use the OpenCode Zen service and need to pass OPENCODE_API_KEY. After some digging, this FAQ section on passing custom variables did the trick:
-[How do I set custom environment variables inside a sandbox?](https://docs.docker.com/ai/sandboxes/faq/#how-do-i-set-custom-environment-variables-inside-a-sandbox).
+## Updating the kits
 
-## Updating the Image
-
-Update the Dockerfile, then build and push.
+Update the kit directory, then build and push with Buildx. Pass the YAML descriptor to `-f` and the kit directory as the build context.
 
 You’ll need a GitHub Personal Access Token (PAT) with at least read/write permissions for packages.
 
 ```bash
-docker build -t ghcr.io/geut/sbx-shell-pi:node24 --push .
+docker buildx build ./pi -f ./pi/pi.yaml \
+  --platform linux/amd64,linux/arm64 \
+  -t ghcr.io/geut/sbx-shell-pi:node24 --push
 ```
 
 ```bash
-docker build -f Dockerfile.shell-docker -t ghcr.io/geut/sbx-shell-pi:node24-docker --push .
+docker buildx build ./pi-docker -f ./pi-docker/pi-docker.yaml \
+  --platform linux/amd64,linux/arm64 \
+  -t ghcr.io/geut/sbx-shell-pi:node24-docker --push
 ```
 
 ```bash
-docker build -f Dockerfile.factory -t ghcr.io/geut/sbx-shell-pi:node-24-factory --push .
-```
-
-Override the Node version (for a future builder tool or manual builds):
-
-```bash
-docker build -f Dockerfile.factory \
-  --build-arg NODE_VERSION=24.20.0 \
-  -t ghcr.io/geut/sbx-shell-pi:node-24-factory \
-  --push .
+docker buildx build ./factory -f ./factory/factory.yaml \
+  --platform linux/amd64,linux/arm64 \
+  -t ghcr.io/geut/sbx-shell-pi:node-24-factory --push
 ```
 
 ## Acknowledgements
 
-This is based on Oleg Šelajev's article [Building custom Docker Sandboxes](https://olegselajev.substack.com/p/building-custom-docker-sandboxes). 
+This is based on Oleg Šelajev's article [Building custom Docker Sandboxes](https://olegselajev.substack.com/p/building-custom-docker-sandboxes).
