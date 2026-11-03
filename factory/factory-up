@@ -14,9 +14,36 @@ root="$(git -C "${1:-$PWD}" rev-parse --show-toplevel 2>/dev/null || (cd "${1:-$
 config="$root/.factory/FACTORY.json"
 env_file="$root/.factory/dashboard.env"
 
+# A repository without a factory gets a starter FACTORY.json. Only the models
+# are required; FACTORY_WORK_MODEL and FACTORY_REVIEW_MODEL override the
+# defaults, which must differ. A GitHub origin fills in tracker and codeHost,
+# with pull requests off until the user opts in.
 if [ ! -f "$config" ]; then
-  echo "No $config. Set up the factory for this repository first." >&2
-  exit 1
+  mkdir -p "$root/.factory"
+  origin="$(git -C "$root" remote get-url origin 2>/dev/null || true)"
+  node -e '
+    const fs = require("node:fs");
+    const [file, root, origin, work, review] = process.argv.slice(1);
+    if (work === review) {
+      console.error(`FACTORY_WORK_MODEL and FACTORY_REVIEW_MODEL must differ (both are ${work}).`);
+      process.exit(1);
+    }
+    const config = {
+      name: require("node:path").basename(root),
+      models: { work, review },
+      server: { host: "0.0.0.0", port: 7731 },
+    };
+    const gh = origin.match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?\/?$/);
+    if (gh) {
+      const [, owner, repo] = gh;
+      config.tracker = { kind: "github", owner, repo, backlog: { labels: ["factory"] } };
+      config.codeHost = { kind: "github", owner, repo, pullRequests: false };
+    }
+    fs.writeFileSync(file, JSON.stringify(config, null, 2) + "\n", { flag: "wx" });
+  ' "$config" "$root" "$origin" \
+    "${FACTORY_WORK_MODEL:-anthropic/claude-sonnet-5-5}" \
+    "${FACTORY_REVIEW_MODEL:-anthropic/claude-opus-5-5}"
+  echo "Created $config with starter settings. Review the models before /factory start."
 fi
 
 # The server binds server.host from FACTORY.json, 127.0.0.1 by default. A

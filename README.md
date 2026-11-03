@@ -38,7 +38,7 @@ Published on GitHub Container Registry (GHCR):
 - [Hunk](https://github.com/modem-dev/hunk) diff viewer (`hunk_version` kit arg, default `0.24.1`), on PATH for the handoff diff, including non-interactive pane scripts. The `hunk-review` skill is installed for pi. Fresh stays `$EDITOR`.
 - `factory` from a [geut/factory-skills release](https://github.com/geut/factory-skills/releases) (`factory_version` kit arg, default `0.1.0`), checked against the release's `.sha256`
 - [factory-skills](https://github.com/geut/factory-skills) Pi package at the same release (`pi install git:github.com/geut/factory-skills@v<factory_version>`): the `/factory` command and the stage skills
-- `factory-up`, which starts the factory server and creates the dashboard's token
+- `factory-up`, which creates a starter `FACTORY.json` when needed, starts the factory server, and creates the dashboard's token
 
 Published on GHCR: `ghcr.io/geut/sbx-shell-pi:node-24-factory`
 
@@ -50,6 +50,7 @@ A mixin that requires `io.github.geut/pi-factory >= 1` can rely on the following
 
 - `factory` and `factory-up` are on `PATH` for the `agent` user, in non-interactive shells too.
 - Herdr is the entrypoint. `factory serve` runs in a Herdr pane, which `factory-up` opens.
+- After a restart (`sbx stop` / `sbx run`), a startup hook reruns `factory-up` for `$WORKSPACE_DIR` once Herdr is up, if `factory-up` ran there before. The server is back without user action; until then the API refuses connections.
 - The factory server listens on container port `7731`, and the kit publishes that port as `factory-api`. `factory-up` makes the server listen on `0.0.0.0`.
 - `factory-up` writes `.factory/dashboard.env` (mode `0600`) at the repository root, with `FACTORY_API_URL`, reachable from inside the sandbox, and `FACTORY_API_TOKEN`, an `act` token for the `dashboard` client. It replaces the file only when the server rejects the token. For the sandbox's own repository, the file is `$WORKSPACE_DIR/.factory/dashboard.env`.
 
@@ -118,7 +119,7 @@ Further runs are simpler: list sandboxes (`sbx ls`) and run one (`sbx run [sandb
 
 ### Factory server
 
-The factory server owns the controller; Pi and the dashboard are its clients ([factory-skills](https://github.com/geut/factory-skills#factory-server)). Set up the factory in the repository first, so `.factory/FACTORY.json` exists, then run this from the repository root in any Herdr pane:
+The factory server owns the controller; Pi and the dashboard are its clients ([factory-skills](https://github.com/geut/factory-skills#factory-server)). Run this from the repository root in any Herdr pane:
 
 ```bash
 factory-up
@@ -126,9 +127,10 @@ factory-up
 
 It does the following:
 
-1. Sets `server.host` to `0.0.0.0` in `FACTORY.json` when the host is missing, `127.0.0.1`, or `localhost`, because a published port never reaches the sandbox's loopback. Any other host stays as you set it, and `factory-up` warns that the published port cannot reach it. If a server is already running on the old host, `factory-up` asks you to stop it and run again.
-2. Opens a Herdr workspace named `factory` at the repository root and runs `factory serve` in it. The server refuses to start outside Herdr, and that workspace gets one tab per ticket. When a server already answers on `/health`, this step is skipped. After a restart, the server opens in a new tab of the existing `factory` workspace.
-3. Creates an `act` token for the `dashboard` client and writes it to `.factory/dashboard.env` (mode `0600`), next to Pi's `local.token`:
+1. Creates `.factory/FACTORY.json` when the repository has none. The starter config sets `name` to the directory name, `models.work` to `anthropic/claude-sonnet-5-5`, `models.review` to `anthropic/claude-opus-5-5`, and `server` to `0.0.0.0:7731`. `FACTORY_WORK_MODEL` and `FACTORY_REVIEW_MODEL` override the models, which must differ. When `origin` is a GitHub remote, it also fills in `tracker` (backlog label `factory`) and `codeHost` with `pullRequests: false`. An existing `FACTORY.json` is never rewritten, apart from step 2. Review the models before `/factory start`; the [factory-skills README](https://github.com/geut/factory-skills#factory-root) lists every setting.
+2. Sets `server.host` to `0.0.0.0` in `FACTORY.json` when the host is missing, `127.0.0.1`, or `localhost`, because a published port never reaches the sandbox's loopback. Any other host stays as you set it, and `factory-up` warns that the published port cannot reach it. If a server is already running on the old host, `factory-up` asks you to stop it and run again.
+3. Opens a Herdr workspace named `factory` at the repository root and runs `factory serve` in it. The server refuses to start outside Herdr, and that workspace gets one tab per ticket. When a server already answers on `/health`, this step is skipped. After a restart, the server opens in a new tab of the existing `factory` workspace.
+4. Creates an `act` token for the `dashboard` client and writes it to `.factory/dashboard.env` (mode `0600`), next to Pi's `local.token`:
 
    ```bash
    FACTORY_API_URL=http://127.0.0.1:7731
@@ -138,6 +140,8 @@ It does the following:
    Tokens are shown only once, so `factory-up` keeps a token the server still accepts and replaces a revoked one. The dashboard's server calls the API with it; the token never reaches the browser.
 
 The kit publishes container port `7731` as `factory-api`. sbx picks the host port; see it with `sbx ports [sandbox]`. The server speaks plain HTTP. If you change `server.port`, the published port no longer matches.
+
+**After a restart.** `factory serve` stops with the sandbox. On the next boot, `factory-autostart` waits until Herdr answers (Herdr starts when you attach), then runs `factory-up` for `$WORKSPACE_DIR`. It does this only where `factory-up` ran before, which it tells from `.factory/dashboard.env`. Its log is `~/.local/state/factory/autostart.log`.
 
 **Webhooks (optional).** To verify GitHub webhooks, the server needs the secret named by `codeHost.webhookSecretEnv` (for example `FACTORY_GITHUB_WEBHOOK_SECRET`). `factory-up` passes that variable from its own environment to the server's pane. sbx secrets reach the sandbox as placeholders that the proxy swaps on outbound requests, so they cannot verify an incoming signature. Export the real value in the pane before running `factory-up`:
 

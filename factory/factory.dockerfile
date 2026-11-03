@@ -117,6 +117,8 @@ RUN pi install "git:github.com/geut/factory-skills@v${FACTORY_VERSION}" \
 
 # factory-up starts `factory serve` in a Herdr workspace and writes the dashboard token
 COPY --chmod=0755 factory-up /usr/local/bin/factory-up
+# factory-autostart reruns factory-up at boot (lifecycle startup hook)
+COPY --chmod=0755 factory-autostart /usr/local/bin/factory-autostart
 
 # Herdr reads ~/.config/herdr/config.toml for the agent user.
 RUN mkdir -p "$HOME/.config/herdr" \
