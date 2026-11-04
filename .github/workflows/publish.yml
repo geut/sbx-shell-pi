@@ -1,0 +1,99 @@
+name: Publish kits
+
+on:
+  workflow_dispatch:
+    inputs:
+      kit:
+        description: Kit to publish
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - pi
+          - pi-docker
+          - factory
+
+concurrency:
+  group: publish-kits
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Pick the kits
+        id: matrix
+        env:
+          KIT: ${{ inputs.kit }}
+        run: |
+          set -euo pipefail
+          all='[
+            {"kit":"pi","tag":"node24"},
+            {"kit":"pi-docker","tag":"node24-docker"},
+            {"kit":"factory","tag":"node-24-factory"}
+          ]'
+          if [ "$KIT" = "all" ]; then
+            matrix="$(jq -c '{include: .}' <<<"$all")"
+          else
+            matrix="$(jq -c --arg kit "$KIT" '{include: map(select(.kit == $kit))}' <<<"$all")"
+          fi
+          echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: plan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    name: publish ${{ matrix.kit }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/login-action@v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Kits run RUN steps for both platforms; the non-native one goes through QEMU.
+      - uses: docker/setup-qemu-action@v4
+
+      - uses: docker/setup-buildx-action@v4
+
+      # One multi-platform build: the sandbox-kit frontend writes the kit
+      # descriptor as annotations on the image index, so the platforms must not
+      # be built separately and merged afterwards.
+      - name: Build and push ${{ matrix.kit }}
+        env:
+          KIT: ${{ matrix.kit }}
+          IMAGE: ghcr.io/${{ github.repository }}:${{ matrix.tag }}
+        run: |
+          docker buildx build "./${KIT}" \
+            -f "./${KIT}/${KIT}.yaml" \
+            --platform linux/amd64,linux/arm64 \
+            -t "$IMAGE" \
+            --push
+
+      - name: Check the published index
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}:${{ matrix.tag }}
+        run: |
+          set -euo pipefail
+          raw="$(docker buildx imagetools inspect --raw "$IMAGE")"
+          for arch in amd64 arm64; do
+            jq -e --arg arch "$arch" '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch)' <<<"$raw" >/dev/null \
+              || { echo "missing linux/${arch} in ${IMAGE}" >&2; exit 1; }
+          done
+          jq -e '.annotations["vnd.docker.sandbox.kit.descriptor"]' <<<"$raw" >/dev/null \
+            || { echo "no kit descriptor on ${IMAGE}" >&2; exit 1; }
+          echo "${IMAGE} has linux/amd64, linux/arm64 and a kit descriptor"
