@@ -35,7 +35,7 @@ Published on GitHub Container Registry (GHCR):
 - Official Herdr agent skill (`npx skills add herdrdev/herdr --skill herdr -g`)
 - [Fresh](https://github.com/sinelaw/fresh) terminal IDE (Linux universal build), default editor (`EDITOR=fresh`)
 - [Hunk](https://github.com/modem-dev/hunk) diff viewer (`hunk_version` kit arg, default `0.24.1`), on PATH for the handoff diff, including non-interactive pane scripts. The `hunk-review` skill is installed for pi. Fresh stays `$EDITOR`.
-- `factory` from a [geut/factory-skills release](https://github.com/geut/factory-skills/releases) (`factory_version` kit arg, default `0.1.0`), checked against the release's `.sha256`
+- `factory` from a [geut/factory-skills release](https://github.com/geut/factory-skills/releases) (`factory_version` kit arg, default `0.2.0`), checked against the release's `.sha256`
 - [factory-skills](https://github.com/geut/factory-skills) Pi package at the same release (`pi install git:github.com/geut/factory-skills@v<factory_version>`): the `/factory` command and the stage skills
 - `factory-up`, which creates a starter `FACTORY.json` when needed, starts the factory server, and creates the dashboard's token
 
