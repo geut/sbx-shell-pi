@@ -154,7 +154,9 @@ How you provide credentials depends on the model/provider. For Claude/Codex and 
 
 ## Updating the kits
 
-Update the kit directory, then build and push with Buildx. Pass the YAML descriptor to `-f` and the kit directory as the build context.
+Update the kit directory and merge it to `main`. Then run the **Publish kits** workflow from the Actions tab (or `gh workflow run publish.yml -f kit=factory`) and pick one kit or `all`. It builds `linux/amd64` and `linux/arm64` in one Buildx call and pushes the tags below to GHCR.
+
+To publish by hand instead, build and push with Buildx. Pass the YAML descriptor to `-f` and the kit directory as the build context. The non-native platform builds under QEMU; if it fails with `Cannot open: Function not implemented`, update the emulators with `docker run --privileged --rm tonistiigi/binfmt --install all`.
 
 You’ll need a GitHub Personal Access Token (PAT) with at least read/write permissions for packages.
 
