@@ -66,9 +66,9 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # Kits run RUN steps for both platforms; the non-native one goes through QEMU.
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@v4
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       # One multi-platform build: the sandbox-kit frontend writes the kit
       # descriptor as annotations on the image index, so the platforms must not
