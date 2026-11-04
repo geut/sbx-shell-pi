@@ -33,7 +33,6 @@ Published on GitHub Container Registry (GHCR):
 - [Herdr](https://herdr.dev) terminal multiplexer
 - `herdr integration install pi` (native pi lifecycle and session reporting in Herdr)
 - Official Herdr agent skill (`npx skills add herdrdev/herdr --skill herdr -g`)
-- [pi-herdr-subagents](https://github.com/modem-dev/pi-herdr-subagents) from `main`: `pi install` of `$HOME/.local/share/pi-herdr-subagents`, plus the bundled Herdr plugin linked and enabled. Example agent definitions are not copied; run `/subagents-init` inside pi if you want `worker`, `planner`, `scout`, and `reviewer`.
 - [Fresh](https://github.com/sinelaw/fresh) terminal IDE (Linux universal build), default editor (`EDITOR=fresh`)
 - [Hunk](https://github.com/modem-dev/hunk) diff viewer (`hunk_version` kit arg, default `0.24.1`), on PATH for the handoff diff, including non-interactive pane scripts. The `hunk-review` skill is installed for pi. Fresh stays `$EDITOR`.
 - `factory` from a [geut/factory-skills release](https://github.com/geut/factory-skills/releases) (`factory_version` kit arg, default `0.1.0`), checked against the release's `.sha256`
