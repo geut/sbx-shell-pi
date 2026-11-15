@@ -136,6 +136,9 @@ For mixin authors. The factory workload provides `node@24` and `io.github.geut/p
 - After a restart, a startup hook reruns `factory-up` for `$WORKSPACE_DIR` once Herdr is up, if `factory-up` ran there before. Until then the API refuses connections.
 - The server listens on container port `7731` on `0.0.0.0`, published as `factory-api`.
 - `factory-up` writes `.factory/dashboard.env` (mode `0600`) at the repository root, with `FACTORY_API_URL`, reachable from inside the sandbox, and `FACTORY_API_TOKEN`, an `act` token for the `dashboard` client. It replaces the file only when the server rejects the token. For the sandbox's own repository, that is `$WORKSPACE_DIR/.factory/dashboard.env`.
+- `sfw` ([Socket Firewall Free](https://github.com/SocketDev/sfw-free/)) is on `PATH` for the `agent` user, in non-interactive shells too.
+- The sandbox has its own Docker daemon (the `shell-docker` base), and `agent` can use it.
+- The image is Ubuntu 26.04, and its only apt sources are Ubuntu's archive, `download.docker.com` and `cli.github.com`.
 
 A change that breaks any of these bumps the major version. The name uses the `io.github.geut/` namespace because bare names belong to Docker's `com.docker.kit/` vocabulary.
 

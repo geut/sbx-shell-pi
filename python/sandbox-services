@@ -19,7 +19,9 @@ running() { [ "$(docker inspect -f '{{.State.Running}}' "sandbox-$1" 2>/dev/null
 
 ready() {
   case "$1" in
-    postgres) docker exec sandbox-postgres pg_isready -q -U postgres >/dev/null 2>&1 ;;
+    # Over TCP: on first boot the entrypoint's init server answers on the
+    # socket only, and stops right after.
+    postgres) docker exec sandbox-postgres pg_isready -q -h 127.0.0.1 -U postgres >/dev/null 2>&1 ;;
     redis) [ "$(docker exec sandbox-redis redis-cli ping 2>/dev/null)" = PONG ] ;;
   esac
 }

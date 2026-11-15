@@ -11,7 +11,7 @@ Your project's own setup (Python version, dependencies, settings, task runner) s
 
 ## What it adds
 
-- **`uv` and `uvx`** in `/usr/local/bin`. They're wrappers that run the real binaries through [Socket Firewall](https://github.com/SocketDev/sfw-free/) (`sfw`), so every package download is checked, including commands the factory runs without a shell. Commands under `uv run` inherit `sfw`'s proxy for as long as they run. To skip it, call `/usr/local/lib/python-kit/bin/uv`.
+- **`uv` and `uvx`** in `/usr/local/bin`. They're wrappers that run the real binaries through [Socket Firewall](https://github.com/SocketDev/sfw-free/) (`sfw`), so every package download is checked, including commands the factory runs without a shell. `uv run --no-sync` and `uv run --offline` can't download, so they skip `sfw` (put the flag right after `run`). Other commands under `uv run` inherit `sfw`'s proxy for as long as they run. `/usr/local/lib/python-kit/bin/uv` is the real binary.
 - **A uv-managed CPython** for every project (`python-preference = "only-managed"` in `/etc/uv/uv.toml`). It follows `.python-version`, and unlike the base's Ubuntu `python3` it has the headers that C extensions build against. uv also copies packages from its cache (`link-mode = "copy"`): worktrees are on the host mount and the cache is in `$HOME`, so hard links fail anyway, and a second worktree's sync still downloads nothing.
 - **`build-essential`, `pkg-config`, `libpq-dev` and `postgresql-client`**, installed with apt when the sandbox is created (about 45 s). This is an install hook, not part of the image: the factory image removes the compiler, and apt keeps the packages consistent with the image's own.
 - **`sandbox-services start | stop | status`**: Postgres 18 and Redis 8 on the sandbox's Docker daemon, started at boot and shared by every worktree. The boot log is `~/.local/state/python-kit/services.log`.
@@ -32,15 +32,15 @@ Your project's own setup (Python version, dependencies, settings, task runner) s
   "validation": {
     "work": {
       "commands": [
-        { "name": "lint", "argv": ["uv", "run", "--frozen", "ruff", "check"] },
-        { "name": "tests", "argv": ["with-worktree-env", "uv", "run", "--frozen", "pytest", "-x"], "timeoutMs": 1200000 }
+        { "name": "lint", "argv": ["uv", "run", "--no-sync", "ruff", "check"] },
+        { "name": "tests", "argv": ["with-worktree-env", "uv", "run", "--no-sync", "pytest", "-x"], "timeoutMs": 1200000 }
       ]
     }
   }
 }
 ```
 
-The default validation timeout is 60 s, too short for most database suites. In a large repository, validate with a scoped command (the tests for what changed) and leave the full suite to CI.
+Setup installs the dependencies through `sfw`, and validation runs with `--no-sync`: a dependency an agent adds mid-ticket must go through `uv add` or `uv sync`, which `sfw` checks, rather than being installed on the side by a validation command. The default validation timeout is 60 s, too short for most database suites. In a large repository, validate with a scoped command (the tests for what changed) and leave the full suite to CI.
 
 ## Parallel tickets on one database server
 

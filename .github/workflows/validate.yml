@@ -2,12 +2,6 @@ name: Validate kits
 
 on:
   pull_request:
-    paths:
-      - "pi/**"
-      - "pi-docker/**"
-      - "factory/**"
-      - "python/**"
-      - ".github/workflows/validate.yml"
 
 permissions:
   contents: read
@@ -19,11 +13,14 @@ jobs:
   plan:
     runs-on: ubuntu-latest
     outputs:
-      kits: ${{ steps.kits.outputs.kits }}
+      matrix: ${{ steps.kits.outputs.matrix }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      # A kit is a directory <kit> with <kit>/<kit>.yaml. A pull request
+      # validates the kits it changes, or all of them when it changes this
+      # workflow.
       - name: Pick the changed kits
         id: kits
         env:
@@ -31,22 +28,34 @@ jobs:
         run: |
           set -euo pipefail
           changed="$(git diff --name-only "$BASE" HEAD)"
-          if grep -qx '.github/workflows/validate.yml' <<<"$changed"; then
-            kits='["pi","pi-docker","factory","python"]'
-          else
-            kits="$(cut -d/ -f1 <<<"$changed" | sort -u \
-              | jq -R -s -c 'split("\n") | map(select(. == "pi" or . == "pi-docker" or . == "factory" or . == "python"))')"
-          fi
-          echo "kits=${kits}" >> "$GITHUB_OUTPUT"
+          all_changed=0
+          grep -qx '.github/workflows/validate.yml' <<<"$changed" && all_changed=1
+          include='[]'
+          for descriptor in */*.yaml; do
+            kit="${descriptor%%/*}"
+            [ "$descriptor" = "${kit}/${kit}.yaml" ] || continue
+            if [ "$all_changed" = 0 ] && ! grep -q "^${kit}/" <<<"$changed"; then
+              continue
+            fi
+            # A recipe that downloads on the builder's platform builds both
+            # platforms without QEMU, so check both, as publish does. The
+            # others build natively here; QEMU would make every PR slow.
+            platforms=linux/amd64
+            if grep -q 'BUILDPLATFORM' "${kit}/${kit}.dockerfile" 2>/dev/null; then
+              platforms=linux/amd64,linux/arm64
+            fi
+            include="$(jq -c --arg kit "$kit" --arg platforms "$platforms" \
+              '. + [{kit: $kit, platforms: $platforms}]' <<<"$include")"
+          done
+          echo "matrix=$(jq -c '{include: .}' <<<"$include")" >> "$GITHUB_OUTPUT"
 
   validate:
     needs: plan
-    if: needs.plan.outputs.kits != '[]'
+    if: needs.plan.outputs.matrix != '{"include":[]}'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix:
-        kit: ${{ fromJSON(needs.plan.outputs.kits) }}
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     name: validate ${{ matrix.kit }}
     steps:
       - uses: actions/checkout@v7
@@ -66,15 +75,15 @@ jobs:
 
       # Building with the kit frontend validates the descriptor; the OCI
       # layout is what kit-tck checks.
-      - name: Build ${{ matrix.kit }}
+      - name: Build ${{ matrix.kit }} (${{ matrix.platforms }})
         env:
           KIT: ${{ matrix.kit }}
+          PLATFORMS: ${{ matrix.platforms }}
         run: |
           docker buildx build "./${KIT}" -f "./${KIT}/${KIT}.yaml" \
+            --platform "$PLATFORMS" \
             --output "type=oci,dest=${RUNNER_TEMP}/layout,tar=false" \
             -t "${KIT}:ci"
 
       - name: kit-tck validate
-        env:
-          KIT: ${{ matrix.kit }}
         run: kit-tck validate --layout "${RUNNER_TEMP}/layout" ci

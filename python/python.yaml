@@ -32,10 +32,11 @@ capabilities:
           - cli.github.com
       runtime:
         allow:
-          # PyPI, through Socket Firewall (whose hosts the factory allows).
-          # uv-managed Pythons come from GitHub releases, also allowed there.
+          # PyPI, through Socket Firewall (whose hosts the factory allows)
           - pypi.org
           - files.pythonhosted.org
+          # uv-managed CPython (python-build-standalone, Astral's mirror)
+          - releases.astral.sh
           # Docker Hub, for the Postgres and Redis images
           - registry-1.docker.io
           - auth.docker.io
