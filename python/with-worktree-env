@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# with-worktree-env <command> [args...]
+#
+# Exports WORKTREE_ID, a short id that is stable for the current git worktree,
+# then runs the command in its place. Two worktrees testing at once against the
+# shared Postgres and Redis use it to keep apart: suffix test database names,
+# pick a key prefix, and so on.
+#
+#   WORKTREE_ID     8 hex characters from the worktree's top-level path
+#   WORKTREE_ROOT   that path
+#
+# A WORKTREE_ID already in the environment is kept, so a caller can pin it.
+set -euo pipefail
+
+if [ "$#" -eq 0 ] || [ "$1" = -h ] || [ "$1" = --help ]; then
+  sed -n '2,12s/^# \{0,1\}//p' "$0"
+  [ "$#" -eq 0 ] && exit 2 || exit 0
+fi
+
+root="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
+export WORKTREE_ROOT="$root"
+if [ -z "${WORKTREE_ID:-}" ]; then
+  WORKTREE_ID="$(printf '%s' "$root" | sha256sum | cut -c1-8)"
+fi
+export WORKTREE_ID
+
+exec "$@"

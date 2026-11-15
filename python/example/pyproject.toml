@@ -1,0 +1,25 @@
+[project]
+name = "factory-python-example"
+version = "0.1.0"
+description = "Sample Django project for the sbx-shell-pi python mixin: two Postgres aliases, a Redis cache, per-worktree test isolation"
+requires-python = ">=3.13"
+dependencies = [
+    "django>=5.2,<6",
+    "psycopg[binary]>=3.2",
+    "redis>=5",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-django>=4.9",
+    "ruff>=0.8",
+]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+python_files = ["tests.py", "test_*.py"]
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["*/migrations/*"]

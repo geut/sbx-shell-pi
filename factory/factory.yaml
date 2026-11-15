@@ -50,6 +50,8 @@ capabilities:
           - api.socket.dev
           - firewall-api.socket.dev
           - herdr.dev
+          # Linear tracker (factory-skills >= the release with the Linear adapter)
+          - api.linear.app
   - type: com.docker.sandbox/lifecycle@1
     config:
       startup:

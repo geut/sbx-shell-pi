@@ -1,0 +1,69 @@
+# syntax=docker/sandbox-kit:3
+schemaVersion: "3"
+kind: mixin
+displayName: python for the pi factory
+description: Python toolchain (uv, just, a preinstalled CPython), shared Postgres and Redis for tests, and per-worktree isolation for the factory
+sourceUrl: https://github.com/geut/sbx-shell-pi
+
+args:
+  python_version:
+    default: "3.13"
+    pattern: '^3\.[0-9]+(\.[0-9]+)?$'
+    description: CPython preinstalled at build time (uv python install); a project's .python-version still wins
+    buildArg: PYTHON_VERSION
+  uv_version:
+    default: "0.13.8"
+    pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'
+    description: astral-sh/uv release, checked against its .sha256
+    buildArg: UV_VERSION
+  just_version:
+    default: "1.59.0"
+    pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'
+    description: casey/just release, checked against its SHA256SUMS
+    buildArg: JUST_VERSION
+  services:
+    default: "postgres,redis"
+    pattern: '^(postgres|redis)(,(postgres|redis))?$'
+    description: Test services sandbox-services starts on the in-sandbox Docker daemon
+    buildArg: SERVICES
+  postgres_version:
+    default: "18"
+    pattern: '^[0-9]+(\.[0-9]+)?$'
+    description: postgres image tag (Docker Hub, -alpine variant)
+    buildArg: POSTGRES_VERSION
+  redis_version:
+    default: "8"
+    pattern: '^[0-9]+(\.[0-9]+){0,2}$'
+    description: redis image tag (Docker Hub, -alpine variant)
+    buildArg: REDIS_VERSION
+
+provides:
+  - "io.github.geut/python@1"
+requires:
+  - "io.github.geut/pi-factory >= 1"
+
+capabilities:
+  - type: com.docker.sandbox/network-policy@1
+    config:
+      runtime:
+        allow:
+          # PyPI, for uv and pip (through Socket Firewall, whose hosts the
+          # factory already allows)
+          - pypi.org
+          - files.pythonhosted.org
+          # Docker Hub, for the in-sandbox daemon's Postgres and Redis pulls
+          - registry-1.docker.io
+          - auth.docker.io
+          - production.cloudfront.docker.com
+          - production.cloudflare.docker.com
+          # uv python install downloads python-build-standalone from GitHub
+          # releases, which the factory already allows.
+  - type: com.docker.sandbox/lifecycle@1
+    config:
+      startup:
+        - command: [/usr/local/bin/python-kit-startup]
+          background: true
+          description: Add Socket Firewall aliases for pip and uv, then start the shared test services
+  - type: com.docker.sandbox/agent-context@1
+    config:
+      contentFile: ./context.md

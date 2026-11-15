@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+# python/check: checks a factory sandbox created with the python mixin.
+#
+# Run it in the sandbox, as agent, from a checkout of this repository:
+#
+#   python/check            every check
+#   python/check --quick    skip the slow ones (.python-version download, parallel suites)
+#
+# It works in a scratch git repository under $WORKSPACE_DIR/.factory/python-check
+# (the same filesystem as the factory's worktrees) holding a copy of
+# python/example, and removes it at the end. Each check prints PASS or FAIL; the
+# exit status is the number of failures.
+set -uo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+example="$here/example"
+quick=0
+[ "${1:-}" = --quick ] && quick=1
+
+workspace="${WORKSPACE_DIR:-$PWD}"
+scratch="$workspace/.factory/python-check"
+log="$(mktemp -d)/check.log"
+failures=0
+
+pass() { printf 'PASS  %s\n' "$1"; }
+fail() {
+  printf 'FAIL  %s\n' "$1"
+  [ -n "${2:-}" ] && sed 's/^/        /' <<<"$2" | tail -n 15
+  failures=$((failures + 1))
+}
+# check <label> <command...>: runs it, keeps its output for a failure.
+check() {
+  local label="$1" out
+  shift
+  if out="$("$@" 2>&1)"; then pass "$label"; else fail "$label" "$out"; fi
+  printf '== %s\n%s\n' "$label" "$out" >>"$log"
+}
+
+cleanup() { rm -rf "$scratch"; }
+trap cleanup EXIT
+
+echo "python mixin check (log: $log)"
+echo
+
+# --- toolchain ----------------------------------------------------------------
+toolchain='python3 --version && uv --version && just --version && psql --version'
+check "toolchain in bash" bash -c "$toolchain"
+# The factory starts commands with its PATH and no shell. Rebuild that: the
+# image's PATH, no profile, no aliases, no BASH_ENV.
+check "toolchain without a shell" env -i HOME="$HOME" PATH="$PATH" \
+  sh -c "unset BASH_ENV; $toolchain"
+check "python is the preinstalled interpreter" sh -c \
+  'python3 -c "import sys; assert sys.prefix.startswith(\"/opt/uv/python/\"), sys.prefix"'
+check "libpq headers and a C compiler" sh -c 'pkg-config --exists libpq && cc --version'
+check "uv link-mode is copy" grep -qx 'link-mode = "copy"' /etc/uv/uv.toml
+
+# --- Socket Firewall aliases -----------------------------------------------------
+check "bash aliases pip and uv to sfw" bash -c \
+  'shopt -s expand_aliases; . /etc/sandbox-persistent.sh; [ "$(alias uv)" = "alias uv='"'"'sfw uv'"'"'" ] && alias pip'
+
+# --- services -------------------------------------------------------------------
+check "sandbox-services status" sandbox-services status
+check "pg_isready -h localhost" pg_isready -h localhost
+. /etc/python-kit/services.env 2>/dev/null || true
+if [[ ",${SERVICES:-postgres}," == *",redis,"* ]]; then
+  check "redis answers PING" sh -c '[ "$(docker exec sandbox-redis redis-cli ping)" = PONG ]'
+fi
+started_before="$(docker inspect -f '{{.State.StartedAt}}' sandbox-postgres 2>/dev/null)"
+check "sandbox-services start is a no-op when running" sh -c '
+  sandbox-services start >/dev/null &&
+  [ "$(docker inspect -f "{{.State.StartedAt}}" sandbox-postgres)" = "$0" ]' "$started_before"
+check "dev role may create databases" sh -c \
+  'psql "postgresql://dev:dev@127.0.0.1:5432/dev" -Atc "select rolcreatedb from pg_roles where rolname = current_user" | grep -qx t'
+
+# --- a scratch repository with two worktrees -----------------------------------
+rm -rf "$scratch"
+mkdir -p "$scratch/repo"
+cp -R "$example/." "$scratch/repo/"
+rm -rf "$scratch/repo/.venv"
+(
+  cd "$scratch/repo" &&
+    git init -q -b main &&
+    git add -A &&
+    git -c user.name=check -c user.email=check@localhost commit -qm example &&
+    git worktree add -q ../wt-a -b wt-a &&
+    git worktree add -q ../wt-b -b wt-b
+) >>"$log" 2>&1 || fail "scratch repository" "$(tail -n 20 "$log")"
+
+check "first worktree: sfw uv sync --frozen" sh -c "cd '$scratch/wt-a' && sfw uv sync --frozen"
+# The second sync must come from the cache: offline proves no download, and uv
+# prints a warning when it falls back from hard links.
+check "second worktree: uv sync downloads nothing, no link warnings" bash -c "
+  cd '$scratch/wt-b' &&
+  out=\$(uv sync --frozen --offline 2>&1) || { echo \"\$out\"; exit 1; }
+  echo \"\$out\"
+  ! grep -qi -e warning -e 'failed to hardlink' <<<\"\$out\""
+check "sfw pip install reaches PyPI" sh -c "
+  cd '$scratch' && uv venv -q --seed pip-venv &&
+  PATH='$scratch/pip-venv/bin':\$PATH sfw pip install -q --no-cache-dir iniconfig &&
+  '$scratch/pip-venv/bin/python' -c 'import iniconfig'"
+
+check "WORKTREE_ID differs between worktrees" sh -c "
+  a=\$(cd '$scratch/wt-a' && with-worktree-env sh -c 'echo \$WORKTREE_ID')
+  b=\$(cd '$scratch/wt-b' && with-worktree-env sh -c 'echo \$WORKTREE_ID')
+  echo \"\$a \$b\"; [ -n \"\$a\" ] && [ \"\$a\" != \"\$b\" ]"
+
+if [ "$quick" = 0 ]; then
+  check "uv honors .python-version (3.12)" sh -c "
+    mkdir -p '$scratch/pyver' && cd '$scratch/pyver' && echo 3.12 > .python-version &&
+    uv run --no-project python -c 'import sys; assert sys.version_info[:2] == (3, 12), sys.version'"
+
+  # Both suites at once against the same server. Without the WORKTREE_ID
+  # suffix, one run's test databases block or drop the other's.
+  (cd "$scratch/wt-a" && with-worktree-env uv run --frozen pytest -q -p no:cacheprovider >"$scratch/a.out" 2>&1) &
+  pid_a=$!
+  (cd "$scratch/wt-b" && with-worktree-env uv run --frozen pytest -q -p no:cacheprovider >"$scratch/b.out" 2>&1) &
+  pid_b=$!
+  wait "$pid_a"; status_a=$?
+  wait "$pid_b"; status_b=$?
+  cat "$scratch/a.out" "$scratch/b.out" >>"$log"
+  if [ "$status_a" = 0 ] && [ "$status_b" = 0 ]; then
+    pass "two worktrees run the example's tests at the same time"
+  else
+    fail "two worktrees run the example's tests at the same time" "$(cat "$scratch/a.out" "$scratch/b.out")"
+  fi
+fi
+
+echo
+if [ "$failures" = 0 ]; then
+  echo "All checks passed."
+else
+  echo "$failures check(s) failed. Full output: $log"
+fi
+exit "$failures"

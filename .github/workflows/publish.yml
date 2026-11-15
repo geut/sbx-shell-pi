@@ -13,6 +13,7 @@ on:
           - pi
           - pi-docker
           - factory
+          - python
 
 concurrency:
   group: publish-kits
@@ -37,7 +38,8 @@ jobs:
           all='[
             {"kit":"pi","tag":"node24"},
             {"kit":"pi-docker","tag":"node24-docker"},
-            {"kit":"factory","tag":"node-24-factory"}
+            {"kit":"factory","tag":"node-24-factory"},
+            {"kit":"python","tag":"python"}
           ]'
           if [ "$KIT" = "all" ]; then
             matrix="$(jq -c '{include: .}' <<<"$all")"

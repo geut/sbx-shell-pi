@@ -6,6 +6,7 @@ The main kit is the **factory** 🏭: a sandbox where several pi agents work on 
 
 - [Set up the factory](#set-up-the-factory)
 - [Everyday use](#everyday-use)
+- [Python projects](#python-projects)
 - [Reference](#reference)
 - [Other kits](#other-kits)
 - [Developing these kits](#developing-these-kits)
@@ -31,7 +32,7 @@ sbx run --name factory ghcr.io/geut/sbx-shell-pi:node-24-factory /path/to/your/p
   --kit ghcr.io/dpaez/sbx-kit-factory-dashboard:0.2.0
 ```
 
-The `--kit` line adds the [dashboard](https://github.com/dpaez/factory-dashboard). Leave it out if you don't want it. The kit set is fixed when the sandbox is created, so adding the dashboard later means creating a new sandbox.
+The `--kit` line adds the [dashboard](https://github.com/dpaez/factory-dashboard). Leave it out if you don't want it. For a Python project, add the [python kit](#python-projects) too. The kit set is fixed when the sandbox is created, so adding a kit later means creating a new sandbox.
 
 When the sandbox starts, you land in **Herdr**, a terminal multiplexer where the agents run side by side.
 
@@ -81,6 +82,138 @@ Open the host port listed for `factory-dashboard` in your browser. Until `factor
 - **After a restart** (`sbx stop`, then `sbx run factory`), the factory server starts again by itself once Herdr is up. There's no need to run `factory-up` again.
 - **Edit files** with `fresh`, the default editor. **Review diffs** with `hunk diff`.
 
+## Python projects
+
+The factory image only has Node. For a Python project (Django, FastAPI, SQLAlchemy, Celery and so on), add the **python** kit. It brings the toolchain, a shared Postgres and Redis for tests, and a way to keep parallel tickets' test data apart.
+
+### Create the sandbox
+
+In step 1, allow `ghcr.io/geut/` (already in the list). Then in step 2:
+
+```bash
+sbx run --name factory ghcr.io/geut/sbx-shell-pi:node-24-factory /path/to/your/project \
+  --kit ghcr.io/geut/sbx-shell-pi:python \
+  --kit ghcr.io/dpaez/sbx-kit-factory-dashboard:0.2.0
+```
+
+The python kit only composes onto the factory. It requires `io.github.geut/pi-factory >= 1`, which the single-pi kits don't provide.
+
+What it adds:
+
+- **`python`, `python3`, `uv`, `uvx` and `just`** in `/usr/local/bin`, so commands the factory runs without a shell find them. The preinstalled interpreter is CPython `3.13` from `uv python install`. A project's `.python-version` wins: `uv` downloads that version on first use.
+- **Build tools** for packages that compile: `gcc`, `make`, `pkg-config`, the libpq headers, and `psql` and `pg_isready`.
+- **Socket Firewall** for `pip` and `uv`: in bash they're aliases for `sfw pip` and `sfw uv`.
+- **Postgres and Redis** on the sandbox's own Docker daemon, started at boot and shared by every worktree (see [Test services](#test-services)).
+- **`with-worktree-env`**, which gives each worktree a stable `WORKTREE_ID` for its test database names and key prefixes.
+- **Network access** to PyPI (`pypi.org`, `files.pythonhosted.org`) and Docker Hub, for the service images.
+- **Agent context**: where the tools are, the service addresses, and how to run tests.
+
+Kit args:
+
+| Arg | Default | What it sets |
+|---|---|---|
+| `python_version` | `3.13` | CPython preinstalled at build time |
+| `uv_version` | `0.13.8` | [uv](https://github.com/astral-sh/uv) release, checked against its `.sha256` |
+| `just_version` | `1.59.0` | [just](https://github.com/casey/just) release, checked against `SHA256SUMS` |
+| `services` | `postgres,redis` | Services to start: `postgres`, `redis`, or both |
+| `postgres_version` | `18` | `postgres:<version>-alpine` image tag |
+| `redis_version` | `8` | `redis:<version>-alpine` image tag |
+
+These are build args, so the published image has the defaults. To change one, run the kit from a checkout (see [Run a kit from a checkout](#run-a-kit-from-a-checkout)) with `--kit-arg <arg>=<value>`, e.g. `--kit ./python --kit-arg services=postgres`. For a single call, `SANDBOX_SERVICES=postgres sandbox-services start` overrides the service list.
+
+### Commands run without a shell
+
+The factory starts `worktree.setup`, validation and QA commands with its `PATH` and no shell. The tools are on that `PATH`, but bash aliases don't apply, so name `sfw` yourself: `["sfw", "uv", "sync", "--frozen"]`.
+
+### A starter `FACTORY.json`
+
+Add these to the `.factory/FACTORY.json` that `factory-up` creates:
+
+```json
+{
+  "worktree": { "setup": [{ "name": "install", "argv": ["sfw", "uv", "sync", "--frozen"] }] },
+  "validation": {
+    "work": {
+      "commands": [
+        { "name": "lint", "argv": ["uv", "run", "ruff", "check"] },
+        { "name": "types", "argv": ["uv", "run", "mypy", "."], "timeoutMs": 900000 },
+        { "name": "tests", "argv": ["with-worktree-env", "uv", "run", "pytest", "-x"], "timeoutMs": 1200000 }
+      ]
+    }
+  }
+}
+```
+
+The default validation timeout is 60 seconds, too short for type checks and database suites, hence `timeoutMs`.
+
+A project with a Vue (or other Node) frontend uses the factory's Node 24. Add its install to `worktree.setup`, e.g. `["sfw", "npm", "ci"]`, and its checks to the validation commands.
+
+**Large suites.** Validation runs on every work round. In a large monorepo, point it at a scoped command, such as the tests for the apps a ticket changes, and leave the full suite to CI.
+
+### Test services
+
+`sandbox-services start | stop | status` manages the containers: `sandbox-postgres` and `sandbox-redis`, with `--restart unless-stopped` and data on named volumes. A startup hook runs `sandbox-services start` at boot, once the daemon answers, and logs to `~/.local/state/python-kit/services.log`. Starting again is a no-op.
+
+| Service | Address | Credentials |
+|---|---|---|
+| Postgres | `127.0.0.1:5432` | `dev` / `dev`, database `dev`, may create databases. Superuser `postgres` / `postgres`. |
+| Redis | `127.0.0.1:6379` | none |
+
+The images come from Docker Hub on first start; the kit doesn't pre-pull them. One server serves every worktree. A project with several database aliases (a primary and a shared database, say) gets all of them on it. The factory's stray-process sweep stops processes, not containers, so these are never caught by it.
+
+### Keep parallel tickets apart
+
+Two tickets testing at once against one server would use the same test database names (`test_<NAME>`), so one run drops or blocks the other. Run tests through `with-worktree-env`, which exports `WORKTREE_ID` (8 hex characters, stable per worktree) and `WORKTREE_ROOT`, then read `WORKTREE_ID` in the project.
+
+**Django** (pytest-django or `manage.py test`), for every alias:
+
+```python
+WORKTREE_ID = os.environ.get("WORKTREE_ID", "local")
+DATABASES = {
+    "default": {..., "NAME": "app", "TEST": {"NAME": f"test_app_{WORKTREE_ID}"}},
+    "shared": {..., "NAME": "shared", "TEST": {"NAME": f"test_shared_{WORKTREE_ID}"}},
+}
+CACHES = {"default": {..., "KEY_PREFIX": f"app:{WORKTREE_ID}"}}
+```
+
+**SQLAlchemy and FastAPI**: create the test database in a session fixture.
+
+```python
+WORKTREE_ID = os.environ.get("WORKTREE_ID", "local")
+TEST_DB = f"test_app_{WORKTREE_ID}"
+
+@pytest.fixture(scope="session")
+def engine():
+    admin = create_engine("postgresql+psycopg://dev:dev@127.0.0.1/dev", isolation_level="AUTOCOMMIT")
+    with admin.connect() as c:
+        c.execute(text(f'DROP DATABASE IF EXISTS "{TEST_DB}" WITH (FORCE)'))
+        c.execute(text(f'CREATE DATABASE "{TEST_DB}"'))
+    engine = create_engine(f"postgresql+psycopg://dev:dev@127.0.0.1/{TEST_DB}")
+    Base.metadata.create_all(engine)  # or run Alembic's upgrade head
+    yield engine
+    engine.dispose()
+```
+
+Override FastAPI's session dependency with one bound to that engine.
+
+**Celery and Redis**: tests usually run tasks eagerly (`task_always_eager`). Code that does reach Redis should keep its keys apart with a prefix, e.g. `broker_transport_options = {"global_keyprefix": f"{WORKTREE_ID}:"}` for Celery and a `KEY_PREFIX` for caches. Redis has only 16 numbered databases, so prefixes scale better than database numbers.
+
+The kit can't edit your settings. [python/example](./python/example/) is a minimal Django project with two aliases and a Redis cache set up this way.
+
+### What to record in `CONTEXT.md`
+
+The planner creates `.factory/CONTEXT.md`. For a Python project, make sure it records the service addresses and credentials, that tests run through `with-worktree-env` and read `WORKTREE_ID`, and how to run one test, e.g. `with-worktree-env uv run pytest path/to/test_x.py::test_y`.
+
+### A private package index or registry
+
+The sandbox only reaches allowed hosts. For a private index, allow its host on your computer, then point `uv` at it in the project's `pyproject.toml` (`[[tool.uv.index]]`):
+
+```bash
+sbx policy allow network pypi.example.com
+```
+
+The same goes for a private Docker registry the services or your tests pull from. For credentials, see [`sbx secret`](https://docs.docker.com/reference/cli/sbx/secret/): the proxy puts the real value into requests to that host, so check that it reaches your index's authentication scheme (for example HTTP Basic, where the client encodes the value) before relying on it.
+
 ## Reference
 
 ### What's in the factory sandbox
@@ -115,6 +248,14 @@ The kit publishes container port `7731` as `factory-api`; `sbx ports factory` sh
 
 **At boot**, `factory-autostart` waits for Herdr (which starts when you attach), then runs `factory-up` for `$WORKSPACE_DIR`, but only if `factory-up` ran there before. Its log is `~/.local/state/factory/autostart.log`.
 
+**Linear tracker.** Set `tracker.kind` to `linear` in `FACTORY.json` (see [Linear](https://github.com/geut/factory-skills#linear) in the factory-skills README), then give the sandbox your Linear API key on the host:
+
+```bash
+sbx secret set-custom --sandbox factory --host api.linear.app --env LINEAR_API_KEY --value lin_api_...
+```
+
+The factory workload allows `api.linear.app`. The key stays on the host; the proxy puts it into requests to Linear. Check with `factory tracker inspect` in the sandbox. Linear needs a factory-skills release that has the Linear tracker (`factory_version`).
+
 **GitHub webhooks (optional).** To verify webhooks, the server needs the secret named by `codeHost.webhookSecretEnv`, for example `FACTORY_GITHUB_WEBHOOK_SECRET`. sbx secrets only reach the sandbox as placeholders, so they can't verify an incoming signature. Pass the real value to `factory-up`:
 
 ```bash
@@ -133,7 +274,9 @@ For mixin authors. The factory workload provides `node@24` and `io.github.geut/p
 
 A change that breaks any of these bumps the major version. The name uses the `io.github.geut/` namespace because bare names belong to Docker's `com.docker.kit/` vocabulary.
 
-The [dashboard](https://github.com/dpaez/factory-dashboard) is such a mixin: it runs beside Herdr on container port `7732` and reads the factory through the server's REST API, using `.factory/dashboard.env`.
+The [dashboard](https://github.com/dpaez/factory-dashboard) is such a mixin: it runs beside Herdr on container port `7732` and reads the factory through the server's REST API, using `.factory/dashboard.env`. The [python kit](#python-projects) is another.
+
+A mixin adds files to the workload, nothing else: its `ENV`, `USER` and entrypoint are ignored. Put binaries where the workload's `PATH` already looks (`/usr/local/bin`), configure tools with files, and append to the workload's own files (`/etc/sandbox-persistent.sh`, `~/.bashrc`) from a startup hook. The workload can remove packages its base had (the factory removes the compiler), so a mixin ships the dependencies it needs.
 
 ## Other kits
 
@@ -184,7 +327,18 @@ docker buildx build ./factory -f ./factory/factory.yaml \
   -t ghcr.io/geut/sbx-shell-pi:node-24-factory --push
 ```
 
-Use `./pi` with `pi.yaml` and tag `node24`, or `./pi-docker` with `pi-docker.yaml` and tag `node24-docker`, for the other kits. The platform that isn't your machine's builds under QEMU. If it fails with `Cannot open: Function not implemented`, update the emulators with `docker run --privileged --rm tonistiigi/binfmt --install all`.
+Use `./pi` with `pi.yaml` and tag `node24`, `./pi-docker` with `pi-docker.yaml` and tag `node24-docker`, or `./python` with `python.yaml` and tag `python`, for the other kits. The platform that isn't your machine's builds under QEMU. If it fails with `Cannot open: Function not implemented`, update the emulators with `docker run --privileged --rm tonistiigi/binfmt --install all`.
+
+### Check the python kit
+
+In a fresh sandbox created with the python kit, from a checkout of this repository:
+
+```bash
+python/check            # toolchain, Socket Firewall, services, uv cache, parallel worktrees
+python/check --quick    # without the .python-version download and the parallel test runs
+```
+
+It prints `PASS` or `FAIL` per check. Run it on arm64 (Docker Desktop on a Mac) and on amd64 before publishing.
 
 ## Acknowledgements
 
