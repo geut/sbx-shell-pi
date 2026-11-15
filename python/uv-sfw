@@ -1,0 +1,12 @@
+#!/bin/sh
+# /usr/local/bin/uv and /usr/local/bin/uvx: run the real binary through
+# Socket Firewall, so every package download is checked, with or without a
+# shell. The real binaries come first on PATH, so sfw resolves uv to them and
+# not back to this wrapper.
+real=/usr/local/lib/python-kit/bin
+tool="$(basename "$0")"
+sfw="$(command -v sfw)" || {
+  echo "$tool: sfw not found; run $real/$tool to skip Socket Firewall" >&2
+  exit 127
+}
+PATH="$real:$PATH" exec "$sfw" "$tool" "$@"

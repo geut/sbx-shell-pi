@@ -1,9 +1,9 @@
-# System-wide uv settings from the python mixin (a mixin cannot set ENV).
-# A project's pyproject.toml or uv.toml still overrides these.
+# System-wide uv settings from the python mixin. A project's own settings win.
 
-# The uv cache lives under $HOME (~/.cache/uv), but worktrees live on the
-# workspace, a host mount: hard links between the two cross filesystems, and
-# uv would fall back to copying with a warning on every sync. Copying from the
-# cache is what happens anyway, so say so: a second worktree's sync still
-# downloads nothing.
+# Always a uv-managed CPython: it follows .python-version, and unlike the
+# base's Ubuntu python3 it has the headers C extensions build against.
+python-preference = "only-managed"
+
+# The cache is under $HOME, worktrees are on the workspace (a host mount), so
+# hard links between them fail. Copy from the cache without the warning.
 link-mode = "copy"

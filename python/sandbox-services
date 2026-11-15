@@ -1,173 +1,89 @@
 #!/usr/bin/env bash
-# Runs the shared test services (Postgres, Redis) on the sandbox's own Docker
-# daemon. One set serves every worktree; tests isolate themselves with
-# WORKTREE_ID (see with-worktree-env).
+# sandbox-services start | stop | status
 #
-#   sandbox-services start    start what's missing; a running service is left alone
-#   sandbox-services stop     stop the containers (data stays in the volumes)
-#   sandbox-services status   one line per service; exits 1 if any is down
+# One Postgres and one Redis on the sandbox's own Docker daemon, shared by
+# every worktree (tests keep apart with WORKTREE_ID, see with-worktree-env).
+# start is a no-op for what already runs. Data lives in named volumes.
 #
-# The services and image tags come from /etc/python-kit/services.env, written
-# from the kit args. SANDBOX_SERVICES overrides the list for one call.
+#   Postgres  127.0.0.1:5432  dev/dev (CREATEDB), database dev; superuser postgres/postgres
+#   Redis     127.0.0.1:6379
+#
+# The boot hook runs `start --wait-for-docker`, which waits for the daemon and
+# logs to ~/.local/state/python-kit/services.log.
 set -euo pipefail
 
-conf=/etc/python-kit/services.env
-SERVICES=postgres
-POSTGRES_IMAGE=postgres:18-alpine
-REDIS_IMAGE=redis:8-alpine
-# shellcheck source=/dev/null
-[ -r "$conf" ] && . "$conf"
-SERVICES="${SANDBOX_SERVICES:-$SERVICES}"
+postgres_image=postgres:18-alpine
+redis_image=redis:8-alpine
 
-# Known, local-only credentials. The ports bind to the sandbox's loopback.
-PG_SUPERUSER=postgres
-PG_SUPERPASS=postgres
-PG_USER=dev
-PG_PASS=dev
-PG_DB=dev
-
-usage() { sed -n '2,13s/^# \{0,1\}//p' "$0"; }
-
-services() { tr ',' '\n' <<<"$SERVICES" | sed 's/[[:space:]]//g' | grep -v '^$'; }
-
-container() { printf 'sandbox-%s' "$1"; }
-
-running() {
-  [ "$(docker inspect -f '{{.State.Running}}' "$(container "$1")" 2>/dev/null)" = true ]
-}
-
-pg_ready() {
-  docker exec "$(container postgres)" pg_isready -q -h 127.0.0.1 -U "$PG_SUPERUSER" >/dev/null 2>&1
-}
-
-redis_ready() {
-  [ "$(docker exec "$(container redis)" redis-cli ping 2>/dev/null)" = PONG ]
-}
+running() { [ "$(docker inspect -f '{{.State.Running}}' "sandbox-$1" 2>/dev/null)" = true ]; }
 
 ready() {
   case "$1" in
-    postgres) pg_ready ;;
-    redis) redis_ready ;;
+    postgres) docker exec sandbox-postgres pg_isready -q -U postgres >/dev/null 2>&1 ;;
+    redis) [ "$(docker exec sandbox-redis redis-cli ping 2>/dev/null)" = PONG ] ;;
   esac
 }
 
-wait_ready() {
-  for _ in $(seq 1 60); do
-    ready "$1" && return 0
-    sleep 1
-  done
-  echo "$1 did not become ready within 60 s; see: docker logs $(container "$1")" >&2
-  return 1
-}
-
-# The role test runners use: it logs in with a password and may create
-# databases (test_<name> for every alias), but is not a superuser.
-ensure_pg_role() {
-  docker exec -i "$(container postgres)" psql -v ON_ERROR_STOP=1 -q -U "$PG_SUPERUSER" -d postgres <<SQL
-DO \$\$
-BEGIN
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '$PG_USER') THEN
-    CREATE ROLE $PG_USER LOGIN PASSWORD '$PG_PASS' CREATEDB;
-  END IF;
-END
-\$\$;
-SELECT 'CREATE DATABASE $PG_DB OWNER $PG_USER'
-WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$PG_DB')\gexec
-SQL
-}
-
-# run_container <service> <image> [docker run options...]
-run_container() {
+# run <service> <image> [docker run options...]
+run() {
   local name="$1" image="$2"
   shift 2
-  if docker inspect "$(container "$name")" >/dev/null 2>&1; then
-    docker start "$(container "$name")" >/dev/null
+  running "$name" && return 0
+  echo "Starting $name ($image)"
+  if docker inspect "sandbox-$name" >/dev/null 2>&1; then
+    docker start "sandbox-$name" >/dev/null
   else
-    docker image inspect "$image" >/dev/null 2>&1 || docker pull -q "$image" >/dev/null
-    docker run -d --name "$(container "$name")" --restart unless-stopped "$@" "$image" >/dev/null
+    docker pull -q "$image" >/dev/null
+    docker run -d --name "sandbox-$name" --restart unless-stopped "$@" "$image" >/dev/null
   fi
 }
 
-start_one() {
-  case "$1" in
-    postgres)
-      if ! running postgres; then
-        echo "Starting postgres ($POSTGRES_IMAGE) on 127.0.0.1:5432"
-        # Postgres 18 images keep data under /var/lib/postgresql/<major>;
-        # older ones declare /var/lib/postgresql/data as the volume.
-        local major data=/var/lib/postgresql
-        major="$(sed -E 's/^[^:]*:([0-9]+).*/\1/' <<<"$POSTGRES_IMAGE")"
-        if [[ "$major" =~ ^[0-9]+$ ]] && [ "$major" -lt 18 ]; then
-          data=/var/lib/postgresql/data
-        fi
-        run_container postgres "$POSTGRES_IMAGE" \
-          -p 127.0.0.1:5432:5432 \
-          -v "sandbox-postgres-data:$data" \
-          -e POSTGRES_USER="$PG_SUPERUSER" \
-          -e POSTGRES_PASSWORD="$PG_SUPERPASS"
-      fi
-      wait_ready postgres
-      ensure_pg_role
-      ;;
-    redis)
-      if ! running redis; then
-        echo "Starting redis ($REDIS_IMAGE) on 127.0.0.1:6379"
-        run_container redis "$REDIS_IMAGE" \
-          -p 127.0.0.1:6379:6379 \
-          -v sandbox-redis-data:/data
-      fi
-      wait_ready redis
-      ;;
-    *)
-      echo "Unknown service: $1 (expected postgres or redis)" >&2
-      return 1
-      ;;
-  esac
+wait_ready() {
+  for _ in $(seq 60); do ready "$1" && return 0; sleep 1; done
+  echo "$1 is not ready after 60 s; see: docker logs sandbox-$1" >&2
+  return 1
 }
 
-cmd_start() {
-  # Two callers at once (the boot hook and an agent) would race on docker run.
-  local lock_dir="${XDG_STATE_HOME:-$HOME/.local/state}/python-kit"
-  mkdir -p "$lock_dir"
-  exec 9>"$lock_dir/services.lock"
-  flock 9
-  local s
-  for s in $(services); do
-    start_one "$s"
-  done
-  cmd_status
+start() {
+  mkdir -p "$HOME/.local/state/python-kit"
+  exec 9>"$HOME/.local/state/python-kit/services.lock"
+  flock 9   # the boot hook and an agent may start at once
+
+  run postgres "$postgres_image" -p 127.0.0.1:5432:5432 -v sandbox-postgres:/var/lib/postgresql \
+    -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres
+  run redis "$redis_image" -p 127.0.0.1:6379:6379 -v sandbox-redis:/data
+  wait_ready postgres
+  wait_ready redis
+
+  # The role test runners use: creates its test databases, not a superuser.
+  docker exec -i sandbox-postgres psql -q -v ON_ERROR_STOP=1 -U postgres <<'SQL'
+SELECT 'CREATE ROLE dev LOGIN PASSWORD ''dev'' CREATEDB'
+WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'dev')\gexec
+SELECT 'CREATE DATABASE dev OWNER dev'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'dev')\gexec
+SQL
+  status
 }
 
-cmd_stop() {
-  local s
-  for s in $(services); do
-    if running "$s"; then
-      docker stop "$(container "$s")" >/dev/null
-      echo "Stopped $s"
-    fi
-  done
-}
-
-cmd_status() {
+status() {
   local s down=0
-  for s in $(services); do
-    if running "$s" && ready "$s"; then
-      case "$s" in
-        postgres) echo "postgres  up  postgres://$PG_USER:$PG_PASS@127.0.0.1:5432/$PG_DB" ;;
-        redis) echo "redis     up  redis://127.0.0.1:6379/0" ;;
-      esac
-    else
-      printf '%-9s down\n' "$s"
-      down=1
-    fi
+  for s in postgres redis; do
+    if running "$s" && ready "$s"; then echo "$s up"; else echo "$s down"; down=1; fi
   done
   return "$down"
 }
 
 case "${1:-}" in
-  start) cmd_start ;;
-  stop) cmd_stop ;;
-  status) cmd_status ;;
-  -h | --help | help) usage ;;
-  *) usage >&2; exit 2 ;;
+  start)
+    if [ "${2:-}" = --wait-for-docker ]; then
+      mkdir -p "$HOME/.local/state/python-kit"
+      exec >>"$HOME/.local/state/python-kit/services.log" 2>&1
+      echo "$(date -Is) boot"
+      for _ in $(seq 120); do docker info >/dev/null 2>&1 && break; sleep 2; done
+    fi
+    start
+    ;;
+  stop) docker stop sandbox-postgres sandbox-redis 2>/dev/null || true ;;
+  status) status ;;
+  *) sed -n '2,12s/^# \{0,1\}//p' "$0"; [ "${1:-}" = -h ] || [ "${1:-}" = --help ] ;;
 esac

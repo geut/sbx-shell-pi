@@ -1,3 +1,0 @@
-# Only the Dockerfile's inputs go to the builder.
-example/
-check

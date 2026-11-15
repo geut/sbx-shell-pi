@@ -1,0 +1,80 @@
+name: Validate kits
+
+on:
+  pull_request:
+    paths:
+      - "pi/**"
+      - "pi-docker/**"
+      - "factory/**"
+      - "python/**"
+      - ".github/workflows/validate.yml"
+
+permissions:
+  contents: read
+
+env:
+  KIT_TCK_VERSION: 3.0.0-m.12
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      kits: ${{ steps.kits.outputs.kits }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Pick the changed kits
+        id: kits
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          changed="$(git diff --name-only "$BASE" HEAD)"
+          if grep -qx '.github/workflows/validate.yml' <<<"$changed"; then
+            kits='["pi","pi-docker","factory","python"]'
+          else
+            kits="$(cut -d/ -f1 <<<"$changed" | sort -u \
+              | jq -R -s -c 'split("\n") | map(select(. == "pi" or . == "pi-docker" or . == "factory" or . == "python"))')"
+          fi
+          echo "kits=${kits}" >> "$GITHUB_OUTPUT"
+
+  validate:
+    needs: plan
+    if: needs.plan.outputs.kits != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        kit: ${{ fromJSON(needs.plan.outputs.kits) }}
+    name: validate ${{ matrix.kit }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Install kit-tck
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          asset="kit-tck_${KIT_TCK_VERSION}_linux_amd64.tar.gz"
+          base="https://github.com/docker/sandbox-kit-spec/releases/download/v${KIT_TCK_VERSION}"
+          curl -fsSLO "${base}/${asset}"
+          curl -fsSL "${base}/checksums.txt" | grep -F "  ${asset}" | sha256sum -c -
+          tar -xzf "${asset}" kit-tck
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      # Building with the kit frontend validates the descriptor; the OCI
+      # layout is what kit-tck checks.
+      - name: Build ${{ matrix.kit }}
+        env:
+          KIT: ${{ matrix.kit }}
+        run: |
+          docker buildx build "./${KIT}" -f "./${KIT}/${KIT}.yaml" \
+            --output "type=oci,dest=${RUNNER_TEMP}/layout,tar=false" \
+            -t "${KIT}:ci"
+
+      - name: kit-tck validate
+        env:
+          KIT: ${{ matrix.kit }}
+        run: kit-tck validate --layout "${RUNNER_TEMP}/layout" ci
