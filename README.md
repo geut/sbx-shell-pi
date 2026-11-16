@@ -28,7 +28,7 @@ This replaces the whole list. If `sbx settings get kit.allowedSources` already s
 
 ```bash
 sbx run --name factory ghcr.io/geut/sbx-shell-pi:node-24-factory /path/to/your/project \
-  --kit ghcr.io/dpaez/sbx-kit-factory-dashboard:0.2.0
+  --kit ghcr.io/dpaez/sbx-kit-factory-dashboard:0.3.0
 ```
 
 The `--kit` line adds the [dashboard](https://github.com/dpaez/factory-dashboard). Leave it out if you don't want it. For a Python project, also add `--kit ghcr.io/geut/sbx-shell-pi:python` (see [python/](./python/)). The kit set is fixed when the sandbox is created, so adding a kit later means creating a new sandbox.
