@@ -1,0 +1,62 @@
+# syntax=docker/sandbox-kit:3
+schemaVersion: "3"
+kind: mixin
+displayName: python for the pi factory
+description: uv through Socket Firewall, build tools and libpq, and a shared Postgres and Redis for tests in the factory sandbox
+sourceUrl: https://github.com/geut/sbx-shell-pi
+
+args:
+  uv_version:
+    default: "0.13.8"
+    pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'
+    description: astral-sh/uv release, checked against its .sha256
+    buildArg: UV_VERSION
+
+provides:
+  - "io.github.geut/python@1"
+requires:
+  - "io.github.geut/pi-factory >= 1"
+
+capabilities:
+  - type: com.docker.sandbox/network-policy@1
+    config:
+      # apt-get update refreshes every configured source, so the factory's
+      # Docker and GitHub CLI repositories are listed too. Ubuntu serves amd64
+      # from archive/security and arm64 from ports.
+      install:
+        allow:
+          - archive.ubuntu.com
+          - security.ubuntu.com
+          - ports.ubuntu.com
+          - download.docker.com
+          - cli.github.com
+      runtime:
+        allow:
+          # PyPI, through Socket Firewall (whose hosts the factory allows)
+          - pypi.org
+          - files.pythonhosted.org
+          # uv-managed CPython (python-build-standalone, Astral's mirror)
+          - releases.astral.sh
+          # Docker Hub, for the Postgres and Redis images
+          - registry-1.docker.io
+          - auth.docker.io
+          - production.cloudfront.docker.com
+          - production.cloudflare.docker.com
+  - type: com.docker.sandbox/lifecycle@1
+    config:
+      install:
+        - command: |
+            set -eu
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+              build-essential pkg-config libpq-dev postgresql-client
+            rm -rf /var/lib/apt/lists/*
+          user: "0"
+          description: Install build tools, libpq headers and the Postgres client
+      startup:
+        - command: [/usr/local/bin/sandbox-services, start, --wait-for-docker]
+          background: true
+          description: Start the shared Postgres and Redis once the Docker daemon answers
+  - type: com.docker.sandbox/agent-context@1
+    config:
+      contentFile: ./context.md

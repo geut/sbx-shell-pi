@@ -1,0 +1,89 @@
+name: Validate kits
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  KIT_TCK_VERSION: 3.0.0-m.12
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.kits.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # A kit is a directory <kit> with <kit>/<kit>.yaml. A pull request
+      # validates the kits it changes, or all of them when it changes this
+      # workflow.
+      - name: Pick the changed kits
+        id: kits
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          changed="$(git diff --name-only "$BASE" HEAD)"
+          all_changed=0
+          grep -qx '.github/workflows/validate.yml' <<<"$changed" && all_changed=1
+          include='[]'
+          for descriptor in */*.yaml; do
+            kit="${descriptor%%/*}"
+            [ "$descriptor" = "${kit}/${kit}.yaml" ] || continue
+            if [ "$all_changed" = 0 ] && ! grep -q "^${kit}/" <<<"$changed"; then
+              continue
+            fi
+            # A recipe that downloads on the builder's platform builds both
+            # platforms without QEMU, so check both, as publish does. The
+            # others build natively here; QEMU would make every PR slow.
+            platforms=linux/amd64
+            if grep -q 'BUILDPLATFORM' "${kit}/${kit}.dockerfile" 2>/dev/null; then
+              platforms=linux/amd64,linux/arm64
+            fi
+            include="$(jq -c --arg kit "$kit" --arg platforms "$platforms" \
+              '. + [{kit: $kit, platforms: $platforms}]' <<<"$include")"
+          done
+          echo "matrix=$(jq -c '{include: .}' <<<"$include")" >> "$GITHUB_OUTPUT"
+
+  validate:
+    needs: plan
+    if: needs.plan.outputs.matrix != '{"include":[]}'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    name: validate ${{ matrix.kit }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Install kit-tck
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          asset="kit-tck_${KIT_TCK_VERSION}_linux_amd64.tar.gz"
+          base="https://github.com/docker/sandbox-kit-spec/releases/download/v${KIT_TCK_VERSION}"
+          curl -fsSLO "${base}/${asset}"
+          curl -fsSL "${base}/checksums.txt" | grep -F "  ${asset}" | sha256sum -c -
+          tar -xzf "${asset}" kit-tck
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      # Building with the kit frontend validates the descriptor; the OCI
+      # layout is what kit-tck checks.
+      - name: Build ${{ matrix.kit }} (${{ matrix.platforms }})
+        env:
+          KIT: ${{ matrix.kit }}
+          PLATFORMS: ${{ matrix.platforms }}
+        run: |
+          docker buildx build "./${KIT}" -f "./${KIT}/${KIT}.yaml" \
+            --platform "$PLATFORMS" \
+            --output "type=oci,dest=${RUNNER_TEMP}/layout,tar=false" \
+            -t "${KIT}:ci"
+
+      - name: kit-tck validate
+        run: kit-tck validate --layout "${RUNNER_TEMP}/layout" ci

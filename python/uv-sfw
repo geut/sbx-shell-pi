@@ -1,0 +1,30 @@
+#!/bin/sh
+# /usr/local/bin/uv and /usr/local/bin/uvx: run the real binary through
+# Socket Firewall, so every package download is checked, with or without a
+# shell. The real binaries come first on PATH, so sfw resolves uv to them and
+# not back to this wrapper.
+#
+# `uv run --no-sync` and `uv run --offline` (or UV_NO_SYNC / UV_OFFLINE) can't
+# download, so they skip sfw: tests and linters then run without its proxy in
+# their environment, and a timeout signals them, not sfw. Put the flag right
+# after `run`.
+real=/usr/local/lib/python-kit/bin
+tool="$(basename "$0")"
+
+if [ "$tool" = uv ] && [ "${1:-}" = run ]; then
+  case "${UV_NO_SYNC:-}${UV_OFFLINE:-}" in ?*) exec "$real/uv" "$@" ;; esac
+  for arg in "$@"; do
+    case "$arg" in
+      run) ;;
+      --no-sync | --offline) exec "$real/uv" "$@" ;;
+      -*) ;;
+      *) break ;;
+    esac
+  done
+fi
+
+sfw="$(command -v sfw)" || {
+  echo "$tool: sfw not found; run $real/$tool to skip Socket Firewall" >&2
+  exit 127
+}
+PATH="$real:$PATH" exec "$sfw" "$tool" "$@"

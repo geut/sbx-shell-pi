@@ -1,0 +1,9 @@
+# System-wide uv settings from the python mixin. A project's own settings win.
+
+# Always a uv-managed CPython: it follows .python-version, and unlike the
+# base's Ubuntu python3 it has the headers C extensions build against.
+python-preference = "only-managed"
+
+# The cache is under $HOME, worktrees are on the workspace (a host mount), so
+# hard links between them fail. Copy from the cache without the warning.
+link-mode = "copy"

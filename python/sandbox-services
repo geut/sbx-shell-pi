@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# sandbox-services start | stop | status
+#
+# One Postgres and one Redis on the sandbox's own Docker daemon, shared by
+# every worktree (tests keep apart with WORKTREE_ID, see with-worktree-env).
+# start is a no-op for what already runs. Data lives in named volumes.
+#
+#   Postgres  127.0.0.1:5432  dev/dev (CREATEDB), database dev; superuser postgres/postgres
+#   Redis     127.0.0.1:6379
+#
+# The boot hook runs `start --wait-for-docker`, which waits for the daemon and
+# logs to ~/.local/state/python-kit/services.log.
+set -euo pipefail
+
+postgres_image=postgres:18-alpine
+redis_image=redis:8-alpine
+
+running() { [ "$(docker inspect -f '{{.State.Running}}' "sandbox-$1" 2>/dev/null)" = true ]; }
+
+ready() {
+  case "$1" in
+    # Over TCP: on first boot the entrypoint's init server answers on the
+    # socket only, and stops right after.
+    postgres) docker exec sandbox-postgres pg_isready -q -h 127.0.0.1 -U postgres >/dev/null 2>&1 ;;
+    redis) [ "$(docker exec sandbox-redis redis-cli ping 2>/dev/null)" = PONG ] ;;
+  esac
+}
+
+# run <service> <image> [docker run options...]
+run() {
+  local name="$1" image="$2"
+  shift 2
+  running "$name" && return 0
+  echo "Starting $name ($image)"
+  if docker inspect "sandbox-$name" >/dev/null 2>&1; then
+    docker start "sandbox-$name" >/dev/null
+  else
+    docker pull -q "$image" >/dev/null
+    docker run -d --name "sandbox-$name" --restart unless-stopped "$@" "$image" >/dev/null
+  fi
+}
+
+wait_ready() {
+  for _ in $(seq 60); do ready "$1" && return 0; sleep 1; done
+  echo "$1 is not ready after 60 s; see: docker logs sandbox-$1" >&2
+  return 1
+}
+
+start() {
+  mkdir -p "$HOME/.local/state/python-kit"
+  exec 9>"$HOME/.local/state/python-kit/services.lock"
+  flock 9   # the boot hook and an agent may start at once
+
+  run postgres "$postgres_image" -p 127.0.0.1:5432:5432 -v sandbox-postgres:/var/lib/postgresql \
+    -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres
+  run redis "$redis_image" -p 127.0.0.1:6379:6379 -v sandbox-redis:/data
+  wait_ready postgres
+  wait_ready redis
+
+  # The role test runners use: creates its test databases, not a superuser.
+  docker exec -i sandbox-postgres psql -q -v ON_ERROR_STOP=1 -U postgres <<'SQL'
+SELECT 'CREATE ROLE dev LOGIN PASSWORD ''dev'' CREATEDB'
+WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'dev')\gexec
+SELECT 'CREATE DATABASE dev OWNER dev'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'dev')\gexec
+SQL
+  status
+}
+
+status() {
+  local s down=0
+  for s in postgres redis; do
+    if running "$s" && ready "$s"; then echo "$s up"; else echo "$s down"; down=1; fi
+  done
+  return "$down"
+}
+
+case "${1:-}" in
+  start)
+    if [ "${2:-}" = --wait-for-docker ]; then
+      mkdir -p "$HOME/.local/state/python-kit"
+      exec >>"$HOME/.local/state/python-kit/services.log" 2>&1
+      echo "$(date -Is) boot"
+      for _ in $(seq 120); do docker info >/dev/null 2>&1 && break; sleep 2; done
+    fi
+    start
+    ;;
+  stop) docker stop sandbox-postgres sandbox-redis 2>/dev/null || true ;;
+  status) status ;;
+  *) sed -n '2,12s/^# \{0,1\}//p' "$0"; [ "${1:-}" = -h ] || [ "${1:-}" = --help ] ;;
+esac

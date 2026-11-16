@@ -1,0 +1,13 @@
+#!/bin/sh
+# with-worktree-env <command> [args...]
+#
+# Runs the command with WORKTREE_ID set: 8 hex characters, stable for the
+# current git worktree. Tests use it to keep their databases and keys apart
+# from other worktrees on the shared Postgres and Redis. Always derived from
+# the worktree, so an inherited value can't make two worktrees share one.
+set -eu
+[ "$#" -gt 0 ] || { sed -n '2,7s/^# \{0,1\}//p' "$0"; exit 2; }
+root="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
+WORKTREE_ID="$(printf '%s' "$root" | sha256sum | cut -c1-8)"
+export WORKTREE_ID
+exec "$@"

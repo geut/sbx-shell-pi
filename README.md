@@ -31,7 +31,7 @@ sbx run --name factory ghcr.io/geut/sbx-shell-pi:node-24-factory /path/to/your/p
   --kit ghcr.io/dpaez/sbx-kit-factory-dashboard:0.2.0
 ```
 
-The `--kit` line adds the [dashboard](https://github.com/dpaez/factory-dashboard). Leave it out if you don't want it. The kit set is fixed when the sandbox is created, so adding the dashboard later means creating a new sandbox.
+The `--kit` line adds the [dashboard](https://github.com/dpaez/factory-dashboard). Leave it out if you don't want it. For a Python project, also add `--kit ghcr.io/geut/sbx-shell-pi:python` (see [python/](./python/)). The kit set is fixed when the sandbox is created, so adding a kit later means creating a new sandbox.
 
 When the sandbox starts, you land in **Herdr**, a terminal multiplexer where the agents run side by side.
 
@@ -89,7 +89,7 @@ Open the host port listed for `factory-dashboard` in your browser. Until `factor
 - Latest Node.js 24.x, checked against `SHASUMS256.txt`
 - [pi](https://pi.dev), with `npm` going through [Socket Firewall](https://github.com/SocketDev/sfw-free/) (`sfw npm`) in bash
 - [Herdr](https://herdr.dev) as the entrypoint, with its pi integration and agent skill
-- `factory` and the [factory-skills](https://github.com/geut/factory-skills) pi package (the `/factory` command and stage skills), from the same release (`factory_version` kit arg, default `0.2.0`). The binary is checked against the release's `.sha256`.
+- `factory` and the [factory-skills](https://github.com/geut/factory-skills) pi package (the `/factory` command and stage skills), from the same release (`factory_version` kit arg, default `0.3.0`). The binary is checked against the release's `.sha256`.
 - `factory-up` and a startup hook that restarts the server at boot
 - [GitHub CLI](https://cli.github.com/) (`gh`)
 - [Fresh](https://github.com/sinelaw/fresh) editor (`$EDITOR`)
@@ -115,6 +115,12 @@ The kit publishes container port `7731` as `factory-api`; `sbx ports factory` sh
 
 **At boot**, `factory-autostart` waits for Herdr (which starts when you attach), then runs `factory-up` for `$WORKSPACE_DIR`, but only if `factory-up` ran there before. Its log is `~/.local/state/factory/autostart.log`.
 
+**Linear tracker.** With `tracker.kind` set to `linear` ([factory-skills: Linear](https://github.com/geut/factory-skills#linear)), give the sandbox your Linear API key on the host. The workload allows `api.linear.app`, and the proxy adds the key to requests to it:
+
+```bash
+sbx secret set-custom --sandbox factory --host api.linear.app --env LINEAR_API_KEY --value lin_api_...
+```
+
 **GitHub webhooks (optional).** To verify webhooks, the server needs the secret named by `codeHost.webhookSecretEnv`, for example `FACTORY_GITHUB_WEBHOOK_SECRET`. sbx secrets only reach the sandbox as placeholders, so they can't verify an incoming signature. Pass the real value to `factory-up`:
 
 ```bash
@@ -130,10 +136,13 @@ For mixin authors. The factory workload provides `node@24` and `io.github.geut/p
 - After a restart, a startup hook reruns `factory-up` for `$WORKSPACE_DIR` once Herdr is up, if `factory-up` ran there before. Until then the API refuses connections.
 - The server listens on container port `7731` on `0.0.0.0`, published as `factory-api`.
 - `factory-up` writes `.factory/dashboard.env` (mode `0600`) at the repository root, with `FACTORY_API_URL`, reachable from inside the sandbox, and `FACTORY_API_TOKEN`, an `act` token for the `dashboard` client. It replaces the file only when the server rejects the token. For the sandbox's own repository, that is `$WORKSPACE_DIR/.factory/dashboard.env`.
+- `sfw` ([Socket Firewall Free](https://github.com/SocketDev/sfw-free/)) is on `PATH` for the `agent` user, in non-interactive shells too.
+- The sandbox has its own Docker daemon (the `shell-docker` base), and `agent` can use it.
+- The image is Ubuntu 26.04, and its only apt sources are Ubuntu's archive, `download.docker.com` and `cli.github.com`.
 
 A change that breaks any of these bumps the major version. The name uses the `io.github.geut/` namespace because bare names belong to Docker's `com.docker.kit/` vocabulary.
 
-The [dashboard](https://github.com/dpaez/factory-dashboard) is such a mixin: it runs beside Herdr on container port `7732` and reads the factory through the server's REST API, using `.factory/dashboard.env`.
+The [dashboard](https://github.com/dpaez/factory-dashboard) is such a mixin: it runs beside Herdr on container port `7732` and reads the factory through the server's REST API, using `.factory/dashboard.env`. The [python kit](./python/) is another.
 
 ## Other kits
 
@@ -166,6 +175,10 @@ sbx run --name factory ./factory /path/to/your/project
 docker buildx create --name kits --driver docker-container --use
 ```
 
+### Validate
+
+Pull requests that touch a kit build it with the kit frontend, which validates the descriptor, and run [`kit-tck validate`](https://github.com/docker/sandbox-kit-spec/releases) on the result (the **Validate kits** workflow). Building a kit proves its files were produced, not that they work, so also compose it onto its workload and try it before merging.
+
 ### Publish
 
 Merge the change to `main`, then run the **Publish kits** workflow from the Actions tab and pick one kit or `all`:
@@ -184,7 +197,7 @@ docker buildx build ./factory -f ./factory/factory.yaml \
   -t ghcr.io/geut/sbx-shell-pi:node-24-factory --push
 ```
 
-Use `./pi` with `pi.yaml` and tag `node24`, or `./pi-docker` with `pi-docker.yaml` and tag `node24-docker`, for the other kits. The platform that isn't your machine's builds under QEMU. If it fails with `Cannot open: Function not implemented`, update the emulators with `docker run --privileged --rm tonistiigi/binfmt --install all`.
+Use `./pi` with `pi.yaml` and tag `node24`, `./pi-docker` with `pi-docker.yaml` and tag `node24-docker`, or `./python` with `python.yaml` and tag `python`, for the other kits. The platform that isn't your machine's builds under QEMU. If it fails with `Cannot open: Function not implemented`, update the emulators with `docker run --privileged --rm tonistiigi/binfmt --install all`.
 
 ## Acknowledgements
 
