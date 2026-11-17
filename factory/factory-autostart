@@ -1,20 +1,32 @@
 #!/usr/bin/env bash
 # Boot hook: brings the factory server back after the sandbox restarts.
 # factory serve must run in a Herdr pane, and Herdr is the entrypoint, so wait
-# for Herdr to answer, then run factory-up for the workspace. Only a workspace
-# where factory-up ran before (it leaves .factory/dashboard.env) is started.
+# for Herdr to answer, then run factory-up for each repository where it ran
+# before: the ones it recorded in ~/.local/state/factory/roots, and the
+# workspace. Only a repository with .factory/dashboard.env is started.
 set -uo pipefail
 
 export PATH="$HOME/.hunk/bin:$HOME/.npm-global/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
 
-root="${WORKSPACE_DIR:-$HOME/workspace}"
 state="$HOME/.local/state/factory"
 mkdir -p "$state"
 exec >>"$state/autostart.log" 2>&1
-echo "$(date -Is) boot: $root"
+echo "$(date -Is) boot"
 
-if [ ! -f "$root/.factory/dashboard.env" ]; then
-  echo "factory-up never ran in $root; nothing to start."
+roots=()
+declare -A seen=()
+while IFS= read -r root; do
+  [ -n "$root" ] && [ -z "${seen[$root]:-}" ] || continue
+  seen[$root]=1
+  if [ -f "$root/.factory/dashboard.env" ]; then
+    roots+=("$root")
+  else
+    echo "factory-up never ran in $root; skipping it."
+  fi
+done < <(cat "$state/roots" 2>/dev/null; echo "${WORKSPACE_DIR:-$HOME/workspace}")
+
+if [ "${#roots[@]}" -eq 0 ]; then
+  echo "Nothing to start."
   exit 0
 fi
 
@@ -23,4 +35,7 @@ until herdr workspace list >/dev/null 2>&1; do
   sleep 2
 done
 
-factory-up "$root"
+for root in "${roots[@]}"; do
+  echo "factory-up $root"
+  factory-up "$root"
+done

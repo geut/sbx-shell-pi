@@ -8,8 +8,40 @@
 # download, so they skip sfw: tests and linters then run without its proxy in
 # their environment, and a timeout signals them, not sfw. Put the flag right
 # after `run`.
+#
+# `uv run`, `sync`, `add` and `remove` refuse to touch a .venv whose
+# interpreter doesn't exist here, such as a macOS one in a checkout mounted
+# from the host: uv would delete it and build a Linux one, breaking the host's
+# environment. Set UV_PROJECT_ENVIRONMENT to use another directory.
 real=/usr/local/lib/python-kit/bin
 tool="$(basename "$0")"
+
+# The .venv uv would use: the nearest one from here up to the repository root.
+foreign_venv() {
+  top="$(git rev-parse --show-toplevel 2>/dev/null)" || top=/
+  dir="$PWD"
+  while :; do
+    if [ -f "$dir/.venv/pyvenv.cfg" ]; then
+      home="$(sed -n 's/^home *= *//p' "$dir/.venv/pyvenv.cfg" | head -n 1)"
+      [ -n "$home" ] && [ ! -d "$home" ] && { echo "$dir/.venv"; return 0; }
+      return 1
+    fi
+    [ "$dir" = "$top" ] || [ "$dir" = / ] && return 1
+    dir="$(dirname "$dir")"
+  done
+}
+
+if [ "$tool" = uv ] && [ -z "${UV_PROJECT_ENVIRONMENT:-}" ]; then
+  case "${1:-}" in
+    run | sync | add | remove)
+      if venv="$(foreign_venv)"; then
+        echo "uv: $venv was made by an interpreter that isn't in this sandbox (probably the host's), so uv would replace it and break it there." >&2
+        echo "Run uv in a factory worktree, or set UV_PROJECT_ENVIRONMENT (for example .venv-sandbox) to keep a separate environment." >&2
+        exit 2
+      fi
+      ;;
+  esac
+fi
 
 if [ "$tool" = uv ] && [ "${1:-}" = run ]; then
   case "${UV_NO_SYNC:-}${UV_OFFLINE:-}" in ?*) exec "$real/uv" "$@" ;; esac

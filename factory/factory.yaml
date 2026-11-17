@@ -58,7 +58,7 @@ capabilities:
         - command: [/usr/local/bin/factory-autostart]
           background: true
           env: [WORKSPACE_DIR]
-          description: Restart the factory server once Herdr is up, if factory-up ran before
+          description: Restart the factory server once Herdr is up, for each repository where factory-up ran
   - type: com.docker.sandbox/agent-context@1
     config:
       filename: AGENTS.md

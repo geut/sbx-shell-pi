@@ -6,6 +6,7 @@ The main kit is the **factory** 🏭: a sandbox where several pi agents work on 
 
 - [Set up the factory](#set-up-the-factory)
 - [Everyday use](#everyday-use)
+- [Keep the code in the sandbox](#keep-the-code-in-the-sandbox)
 - [Reference](#reference)
 - [Other kits](#other-kits)
 - [Developing these kits](#developing-these-kits)
@@ -32,6 +33,8 @@ sbx run --name factory ghcr.io/geut/sbx-shell-pi:node-24-factory /path/to/your/p
 ```
 
 The `--kit` line adds the [dashboard](https://github.com/dpaez/factory-dashboard). Leave it out if you don't want it. For a Python project, also add `--kit ghcr.io/geut/sbx-shell-pi:python` (see [python/](./python/)). The kit set is fixed when the sandbox is created, so adding a kit later means creating a new sandbox.
+
+This mounts your project from the host, so the sandbox and your computer share one checkout, `.venv` and `.env` included. To keep them apart, [keep the code in the sandbox](#keep-the-code-in-the-sandbox) instead.
 
 When the sandbox starts, you land in **Herdr**, a terminal multiplexer where the agents run side by side.
 
@@ -81,13 +84,83 @@ Open the host port listed for `factory-dashboard` in your browser. Until `factor
 - **After a restart** (`sbx stop`, then `sbx run factory`), the factory server starts again by itself once Herdr is up. There's no need to run `factory-up` again.
 - **Edit files** with `fresh`, the default editor. **Review diffs** with `hunk diff`.
 
+## Keep the code in the sandbox
+
+By default the sandbox mounts your checkout from the host at the same path, and the factory's worktrees live inside it, under `.factory/worktrees/`. Both sides then work on the same files: a `uv sync` or `npm install` on one side replaces the other's `.venv` or `node_modules` with one for its own OS, config loaders inside the sandbox can read your `.env`, and both share one `.git`. The [python kit](./python/) refuses the worst of it, but only a separate checkout prevents it.
+
+A sandbox created **without a path** mounts nothing from your computer. You clone the repository into it, and everything the factory makes (worktrees, environments, caches, its database) stays on the sandbox's own disk:
+
+| | Host mount (default) | Code in the sandbox |
+|---|---|---|
+| Checkout | your directory, at the same path | a clone in `~/workspace` |
+| `.venv`, `node_modules`, `.env`, `.git` | shared with your computer | the sandbox's own |
+| You see the agents' work | immediately, in your checkout | when you fetch it (below) |
+| `sbx rm` | leaves your files | deletes the clone and anything not pushed or copied out |
+
+`sbx run --clone` sits in between: the sandbox gets its own clone and can't change your repository, but your whole directory is readable at `/run/sandbox/source`, untracked `.env` files included. Use the sandbox's own clone if that matters.
+
+### Set it up
+
+1. Create the sandbox without a path, with the same kits:
+
+   ```bash
+   sbx run --name factory ghcr.io/geut/sbx-shell-pi:node-24-factory \
+     --kit ghcr.io/dpaez/sbx-kit-factory-dashboard:0.3.0
+   ```
+
+2. For a private repository, or for the factory to push, give the sandbox a GitHub token (on the host): `sbx secret set github --sandbox factory -t "$(gh auth token)"`. The proxy adds it to HTTPS requests to GitHub; nothing from your SSH agent or git config is used.
+3. In the sandbox, clone into the workspace directory itself (the dashboard and the restart hook look there), over HTTPS:
+
+   ```bash
+   git clone https://github.com/OWNER/REPO.git ~/workspace
+   ```
+
+4. `.factory/` isn't in the repository. To reuse your settings, copy them in from the host; otherwise `factory-up` writes a starter `FACTORY.json`:
+
+   ```bash
+   sbx exec factory mkdir -p /home/agent/workspace/.factory
+   sbx cp .factory/FACTORY.json factory:/home/agent/workspace/.factory/FACTORY.json
+   sbx cp .factory/CONTEXT.md factory:/home/agent/workspace/.factory/CONTEXT.md
+   ```
+
+   Copy only these. Don't copy `.env`, `.venv` or `local.token`: the sandbox makes its own.
+5. Continue with [step 3](#3-add-your-model-provider-key). `factory-up` runs in `~/workspace`.
+
+Tickets come from the tracker as before. To open a shell in the sandbox from the host, run `sbx exec -it factory bash`.
+
+### Get the work out
+
+- **Committed work:** with `codeHost.pullRequests` on, wrap-up pushes the ticket's branch and opens the pull request. Otherwise push it from the sandbox (`git push origin <branch>`), or carry it in a bundle:
+
+  ```bash
+  # in the sandbox
+  git -C ~/workspace bundle create /tmp/work.bundle <branch>
+  # on the host, in your checkout
+  sbx cp factory:/tmp/work.bundle . && git fetch ./work.bundle <branch>:<branch>
+  ```
+
+- **Uncommitted changes** in a worktree: `git diff HEAD > /tmp/work.patch`, then `sbx cp` it out and `git apply` it.
+- **Untracked files:** `git ls-files -oz --exclude-standard | tar --null -T - -czf /tmp/untracked.tgz`, then `sbx cp` it out.
+
+`sbx stop` and `sbx run factory` keep everything, the factory's tickets included. `sbx rm factory` asks for confirmation, then deletes the clone, its worktrees and the factory's state for good, so get the work out first.
+
+### Move an existing factory sandbox
+
+In a host-mounted sandbox the work is already on your computer: ticket branches are in your repository, and worktrees and the factory's state are under `.factory/`.
+
+1. Let running tickets reach handoff, or note where they are. The new sandbox starts with an empty factory, and tickets don't carry over.
+2. Push the branches the new sandbox should see. Its clone only has what's on GitHub.
+3. `sbx rm factory` (it asks first). With a host mount, this leaves your files alone.
+4. Create the sandbox as above, and copy `FACTORY.json` and `CONTEXT.md` in.
+5. When you no longer need them, remove the old worktrees on the host (`git worktree list`, then `git worktree remove <path>`) and the rest of `.factory/`.
+
 ## Reference
 
 ### What's in the factory sandbox
 
 - The [`shell-docker`](https://hub.docker.com/r/docker/sandbox-templates) base, so agents get **their own Docker daemon** for tests
 - Latest Node.js 24.x, checked against `SHASUMS256.txt`
-- [pi](https://pi.dev), with `npm` going through [Socket Firewall](https://github.com/SocketDev/sfw-free/) (`sfw npm`) in bash
+- [pi](https://pi.dev), with `npm` going through [Socket Firewall](https://github.com/SocketDev/sfw-free/) (`sfw npm`) in bash, and its install telemetry (anonymous install and update reports, provider attribution headers) off. Turn it on in pi's `/settings`, or with `PI_TELEMETRY=1`.
 - [Herdr](https://herdr.dev) as the entrypoint, with its pi integration and agent skill
 - `factory` and the [factory-skills](https://github.com/geut/factory-skills) pi package (the `/factory` command and stage skills), from the same release (`factory_version` kit arg, default `0.3.0`). The binary is checked against the release's `.sha256`.
 - `factory-up` and a startup hook that restarts the server at boot
@@ -99,10 +172,11 @@ Open the host port listed for `factory-dashboard` in your browser. Until `factor
 
 Run it from the repository root in any Herdr pane. It:
 
-1. **Creates `.factory/FACTORY.json`** if the repository has none. The starter config sets `name` to the directory name, `models.work` to `anthropic/claude-sonnet-5-5`, `models.review` to `anthropic/claude-opus-5-5`, and `server` to `0.0.0.0:7731`. Set `FACTORY_WORK_MODEL` and `FACTORY_REVIEW_MODEL` to choose other models (they must differ). When `origin` is a GitHub remote, it also fills in `tracker` (backlog label `factory`) and `codeHost` with `pullRequests: false`. An existing `FACTORY.json` is never rewritten, except for step 2.
-2. **Makes the server reachable.** It sets `server.host` to `0.0.0.0` when the host is missing, `127.0.0.1` or `localhost`, because a published port can't reach the sandbox's loopback. Any other host stays as you set it, with a warning. If a server is already running on the old host, `factory-up` asks you to stop it and run again.
-3. **Starts `factory serve`** in a Herdr workspace named `factory` (the server refuses to start outside Herdr). If a server already answers on `/health`, this step is skipped.
-4. **Writes the dashboard's token** to `.factory/dashboard.env` (mode `0600`):
+1. **Prepares git.** When `origin` is an SSH GitHub URL (`git@github.com:…`), it sends GitHub's SSH URLs over HTTPS in the sandbox user's `~/.gitconfig` (`url.https://github.com/.insteadOf`), because the proxy adds GitHub credentials to HTTPS only and the factory fetches `origin` before every ticket. The repository's own config isn't touched. It also adds `/.factory/` to the repository's `.git/info/exclude`, which is local and never committed, so the factory's worktrees stay out of `git status`.
+2. **Creates `.factory/FACTORY.json`** if the repository has none. The starter config sets `name` to the directory name, `models.work` to `anthropic/claude-sonnet-5-5`, `models.review` to `anthropic/claude-opus-5-5`, and `server` to `0.0.0.0:7731`. Set `FACTORY_WORK_MODEL` and `FACTORY_REVIEW_MODEL` to choose other models (they must differ). When `origin` is a GitHub remote, it also fills in `tracker` (backlog label `factory`) and `codeHost` with `pullRequests: false`. An existing `FACTORY.json` is never rewritten, except for step 3.
+3. **Makes the server reachable.** It sets `server.host` to `0.0.0.0` when the host is missing, `127.0.0.1` or `localhost`, because a published port can't reach the sandbox's loopback. Any other host stays as you set it, with a warning. If a server is already running on the old host, `factory-up` asks you to stop it and run again.
+4. **Starts `factory serve`** in a Herdr workspace named `factory` (the server refuses to start outside Herdr). If a server already answers on `/health`, this step is skipped.
+5. **Writes the dashboard's token** to `.factory/dashboard.env` (mode `0600`):
 
    ```bash
    FACTORY_API_URL=http://127.0.0.1:7731
@@ -113,7 +187,13 @@ Run it from the repository root in any Herdr pane. It:
 
 The kit publishes container port `7731` as `factory-api`; `sbx ports factory` shows its host port. The server speaks plain HTTP. If you change `server.port`, the published port no longer matches.
 
-**At boot**, `factory-autostart` waits for Herdr (which starts when you attach), then runs `factory-up` for `$WORKSPACE_DIR`, but only if `factory-up` ran there before. Its log is `~/.local/state/factory/autostart.log`.
+**At boot**, `factory-autostart` waits for Herdr (which starts when you attach), then runs `factory-up` again for each repository where it ran before: the workspace, and every repository `factory-up` listed in `~/.local/state/factory/roots`. Its log is `~/.local/state/factory/autostart.log`.
+
+**Project skills.** pi finds skills in `.pi/skills` and `.agents/skills`, not in `.claude/skills`. If your repository keeps its skills there for Claude Code, point pi at them in the project's `.pi/settings.json` (paths there resolve from `.pi/`):
+
+```json
+{ "skills": ["../.claude/skills"] }
+```
 
 **Linear tracker.** With `tracker.kind` set to `linear` ([factory-skills: Linear](https://github.com/geut/factory-skills#linear)), give the sandbox your Linear API key on the host. The workload allows `api.linear.app`, and the proxy adds the key to requests to it:
 
@@ -133,7 +213,7 @@ For mixin authors. The factory workload provides `node@24` and `io.github.geut/p
 
 - `factory` and `factory-up` are on `PATH` for the `agent` user, in non-interactive shells too.
 - Herdr is the entrypoint. `factory serve` runs in a Herdr pane, which `factory-up` opens.
-- After a restart, a startup hook reruns `factory-up` for `$WORKSPACE_DIR` once Herdr is up, if `factory-up` ran there before. Until then the API refuses connections.
+- After a restart, a startup hook reruns `factory-up` once Herdr is up, for `$WORKSPACE_DIR` and every other repository where `factory-up` ran before. Until then the API refuses connections.
 - The server listens on container port `7731` on `0.0.0.0`, published as `factory-api`.
 - `factory-up` writes `.factory/dashboard.env` (mode `0600`) at the repository root, with `FACTORY_API_URL`, reachable from inside the sandbox, and `FACTORY_API_TOKEN`, an `act` token for the `dashboard` client. It replaces the file only when the server rejects the token. For the sandbox's own repository, that is `$WORKSPACE_DIR/.factory/dashboard.env`.
 - `sfw` ([Socket Firewall Free](https://github.com/SocketDev/sfw-free/)) is on `PATH` for the `agent` user, in non-interactive shells too.

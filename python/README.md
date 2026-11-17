@@ -11,7 +11,7 @@ Your project's own setup (Python version, dependencies, settings, task runner) s
 
 ## What it adds
 
-- **`uv` and `uvx`** in `/usr/local/bin`. They're wrappers that run the real binaries through [Socket Firewall](https://github.com/SocketDev/sfw-free/) (`sfw`), so every package download is checked, including commands the factory runs without a shell. `uv run --no-sync` and `uv run --offline` can't download, so they skip `sfw` (put the flag right after `run`). Other commands under `uv run` inherit `sfw`'s proxy for as long as they run. `/usr/local/lib/python-kit/bin/uv` is the real binary.
+- **`uv` and `uvx`** in `/usr/local/bin`. They're wrappers that run the real binaries through [Socket Firewall](https://github.com/SocketDev/sfw-free/) (`sfw`), so every package download is checked, including commands the factory runs without a shell. `uv run --no-sync` and `uv run --offline` can't download, so they skip `sfw` (put the flag right after `run`). Other commands under `uv run` inherit `sfw`'s proxy for as long as they run. `/usr/local/lib/python-kit/bin/uv` is the real binary. `uv run`, `sync`, `add` and `remove` refuse to touch a `.venv` whose interpreter doesn't exist in the sandbox, such as the host's macOS one at the root of a mounted checkout; set `UV_PROJECT_ENVIRONMENT` to use another directory.
 - **A uv-managed CPython** for every project (`python-preference = "only-managed"` in `/etc/uv/uv.toml`). It follows `.python-version`, and unlike the base's Ubuntu `python3` it has the headers that C extensions build against. uv also copies packages from its cache (`link-mode = "copy"`): worktrees are on the host mount and the cache is in `$HOME`, so hard links fail anyway, and a second worktree's sync still downloads nothing.
 - **`build-essential`, `pkg-config`, `libpq-dev` and `postgresql-client`**, installed with apt when the sandbox is created (about 45 s). This is an install hook, not part of the image: the factory image removes the compiler, and apt keeps the packages consistent with the image's own.
 - **`sandbox-services start | stop | status`**: Postgres 18 and Redis 8 on the sandbox's Docker daemon, started at boot and shared by every worktree. The boot log is `~/.local/state/python-kit/services.log`.
@@ -41,6 +41,19 @@ Your project's own setup (Python version, dependencies, settings, task runner) s
 ```
 
 Setup installs the dependencies through `sfw`, and validation runs with `--no-sync`: a dependency an agent adds mid-ticket must go through `uv add` or `uv sync`, which `sfw` checks, rather than being installed on the side by a validation command. The default validation timeout is 60 s, too short for most database suites. In a large repository, validate with a scoped command (the tests for what changed) and leave the full suite to CI.
+
+## The host's checkout
+
+With the project mounted from the host (the default), the main checkout's `.venv` and `.env` are the host's. A ticket worktree gets its own `.venv` from `uv sync`, but no `.env`, and a loader that searches upward for one (python-dotenv's `load_dotenv()` with no path) finds the main checkout's: the host developer's real configuration. Write the worktree's `.env` in setup, from the project's test template, before anything loads settings:
+
+```json
+{ "worktree": { "setup": [
+  { "name": "env", "argv": ["cp", ".env.test.example", ".env"] },
+  { "name": "install", "argv": ["uv", "sync", "--frozen"] }
+] } }
+```
+
+Other config loaders that search upward need the same. To keep the host's files out of the sandbox altogether, [keep the code in the sandbox](../README.md#keep-the-code-in-the-sandbox).
 
 ## Parallel tickets on one database server
 

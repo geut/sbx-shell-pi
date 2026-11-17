@@ -104,6 +104,19 @@ RUN case "$(dpkg --print-architecture)" in \
 RUN pi install "git:github.com/geut/factory-skills@v${FACTORY_VERSION}" \
     && pi list | tee /dev/stderr | grep -F "git:github.com/geut/factory-skills@v${FACTORY_VERSION}"
 
+# pi's install telemetry (anonymous install/update reports and provider
+# attribution headers) is off. Turn it back on in /settings, or with
+# PI_TELEMETRY=1, which overrides the setting.
+RUN node -e ' \
+      const fs = require("node:fs"); \
+      const file = `${process.env.HOME}/.pi/agent/settings.json`; \
+      const settings = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : {}; \
+      settings.enableInstallTelemetry = false; \
+      fs.mkdirSync(require("node:path").dirname(file), { recursive: true }); \
+      fs.writeFileSync(file, JSON.stringify(settings, null, 2) + "\n"); \
+    ' \
+    && grep -F '"enableInstallTelemetry": false' "$HOME/.pi/agent/settings.json"
+
 # factory-up starts `factory serve` in a Herdr workspace and writes the dashboard token
 COPY --chmod=0755 factory-up /usr/local/bin/factory-up
 # factory-autostart reruns factory-up at boot (lifecycle startup hook)
