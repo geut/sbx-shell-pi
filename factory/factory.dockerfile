@@ -1,7 +1,7 @@
 FROM docker/sandbox-templates:shell-docker
 
 ARG PI_VERSION=latest
-ARG FACTORY_VERSION=0.4.0
+ARG FACTORY_VERSION=0.4.1
 ARG HUNK_VERSION=0.24.1
 
 USER root
