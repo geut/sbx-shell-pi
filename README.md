@@ -158,7 +158,7 @@ In a host-mounted sandbox the work is already on your computer: ticket branches 
 
 ### What's in the factory sandbox
 
-- The [`shell-docker`](https://hub.docker.com/r/docker/sandbox-templates) base, so agents get **their own Docker daemon** for tests
+- The [`shell-docker`](https://hub.docker.com/r/docker/sandbox-templates) base, so agents get **their own Docker daemon** for tests, with Docker Hub allowed for pulling images
 - Latest Node.js 24.x, checked against `SHASUMS256.txt`
 - [pi](https://pi.dev), with `npm` going through [Socket Firewall](https://github.com/SocketDev/sfw-free/) (`sfw npm`) in bash, and its install telemetry (anonymous install and update reports, provider attribution headers) off. Turn it on in pi's `/settings`, or with `PI_TELEMETRY=1`.
 - [Herdr](https://herdr.dev) as the entrypoint, with its pi integration and agent skill
@@ -217,7 +217,7 @@ For mixin authors. The factory workload provides `node@24` and `io.github.geut/p
 - The server listens on container port `7731` on `0.0.0.0`, published as `factory-api`.
 - `factory-up` writes `.factory/dashboard.env` (mode `0600`) at the repository root, with `FACTORY_API_URL`, reachable from inside the sandbox, and `FACTORY_API_TOKEN`, an `act` token for the `dashboard` client. It replaces the file only when the server rejects the token. For the sandbox's own repository, that is `$WORKSPACE_DIR/.factory/dashboard.env`.
 - `sfw` ([Socket Firewall Free](https://github.com/SocketDev/sfw-free/)) is on `PATH` for the `agent` user, in non-interactive shells too.
-- The sandbox has its own Docker daemon (the `shell-docker` base), and `agent` can use it.
+- The sandbox has its own Docker daemon (the `shell-docker` base), and `agent` can use it. It can pull images from Docker Hub.
 - The image is Ubuntu 26.04, and its only apt sources are Ubuntu's archive, `download.docker.com` and `cli.github.com`.
 
 A change that breaks any of these bumps the major version. The name uses the `io.github.geut/` namespace because bare names belong to Docker's `com.docker.kit/` vocabulary.

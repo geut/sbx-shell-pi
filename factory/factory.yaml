@@ -52,6 +52,12 @@ capabilities:
           - herdr.dev
           # Linear tracker (factory-skills 0.3.0 and later)
           - api.linear.app
+          # Docker Hub, so the sandbox's Docker daemon can pull images, such as
+          # the services a project's tests run
+          - registry-1.docker.io
+          - auth.docker.io
+          - production.cloudfront.docker.com
+          - production.cloudflare.docker.com
   - type: com.docker.sandbox/lifecycle@1
     config:
       startup:

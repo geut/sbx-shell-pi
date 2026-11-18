@@ -49,7 +49,7 @@ Other config loaders that search upward need the same. To keep the host's files 
 
 ## Services for tests
 
-Postgres, Redis and anything else your tests need are your project's to bring, at the versions it uses, for example with a Compose file on the sandbox's own Docker daemon. Pulling images needs their registry allowed (Docker Hub is `registry-1.docker.io`, `auth.docker.io`, `production.cloudfront.docker.com` and `production.cloudflare.docker.com`): `sbx policy allow network <hosts>` on your computer.
+Postgres, Redis and anything else your tests need are your project's to bring, at the versions it uses, for example with a Compose file on the sandbox's own Docker daemon. The factory allows Docker Hub; for images from another registry, allow its host on your computer (`sbx policy allow network <host>`).
 
 Tickets run in parallel, so tests from two worktrees can run at once. Either give each worktree its own services (a Compose project per worktree, on ports Docker assigns), or share one set and keep each worktree's databases and keys apart. Record how in `.factory/CONTEXT.md` so agents follow it.
 
