@@ -162,7 +162,7 @@ In a host-mounted sandbox the work is already on your computer: ticket branches 
 - Latest Node.js 24.x, checked against `SHASUMS256.txt`
 - [pi](https://pi.dev), with `npm` going through [Socket Firewall](https://github.com/SocketDev/sfw-free/) (`sfw npm`) in bash, and its install telemetry (anonymous install and update reports, provider attribution headers) off. Turn it on in pi's `/settings`, or with `PI_TELEMETRY=1`.
 - [Herdr](https://herdr.dev) as the entrypoint, with its pi integration and agent skill
-- `factory` and the [factory-skills](https://github.com/geut/factory-skills) pi package (the `/factory` command and stage skills), from the same release (`factory_version` kit arg, default `0.3.0`). The binary is checked against the release's `.sha256`.
+- `factory` and the [factory-skills](https://github.com/geut/factory-skills) pi package (the `/factory` command and stage skills), from the same release (`factory_version` kit arg, default `0.4.0`). The binary is checked against the release's `.sha256`.
 - `factory-up` and a startup hook that restarts the server at boot
 - [GitHub CLI](https://cli.github.com/) (`gh`)
 - [Fresh](https://github.com/sinelaw/fresh) editor (`$EDITOR`)
