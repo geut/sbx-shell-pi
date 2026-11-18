@@ -35,4 +35,3 @@ COPY uv.toml /etc/uv/uv.toml
 # uv and uvx on PATH are wrappers that run the real binaries through sfw.
 COPY --chmod=0755 uv-sfw /usr/local/bin/uv
 COPY --chmod=0755 uv-sfw /usr/local/bin/uvx
-COPY --chmod=0755 sandbox-services with-worktree-env /usr/local/bin/
