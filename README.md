@@ -88,7 +88,7 @@ Open the host port listed for `factory-dashboard` in your browser. Until `factor
 
 By default the sandbox mounts your checkout from the host at the same path, and the factory's worktrees live inside it, under `.factory/worktrees/`. Both sides then work on the same files: a `uv sync` or `npm install` on one side replaces the other's `.venv` or `node_modules` with one for its own OS, config loaders inside the sandbox can read your `.env`, and both share one `.git`. The [python kit](./python/) refuses the worst of it, but only a separate checkout prevents it.
 
-A sandbox created **without a path** mounts nothing from your computer. You clone the repository into it, and everything the factory makes (worktrees, environments, caches, its database) stays on the sandbox's own disk:
+A sandbox made with `sbx create` and **no path** mounts nothing from your computer (`sbx run` always mounts one: the current directory when you don't pass a path). You clone the repository into it, and everything the factory makes (worktrees, environments, caches, its database) stays on the sandbox's own disk:
 
 | | Host mount (default) | Code in the sandbox |
 |---|---|---|
@@ -101,11 +101,12 @@ A sandbox created **without a path** mounts nothing from your computer. You clon
 
 ### Set it up
 
-1. Create the sandbox without a path, with the same kits:
+1. Create the sandbox with `sbx create` and no path, with the same kits, then attach to it:
 
    ```bash
-   sbx run --name factory ghcr.io/geut/sbx-shell-pi:node-24-factory \
+   sbx create --name factory ghcr.io/geut/sbx-shell-pi:node-24-factory \
      --kit ghcr.io/dpaez/sbx-kit-factory-dashboard:0.3.0
+   sbx run --name factory
    ```
 
 2. For a private repository, or for the factory to push, give the sandbox a GitHub token (on the host): `sbx secret set github --sandbox factory -t "$(gh auth token)"`. The proxy adds it to HTTPS requests to GitHub; nothing from your SSH agent or git config is used.
