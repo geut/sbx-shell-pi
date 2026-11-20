@@ -103,7 +103,11 @@ RUN case "$(dpkg --print-architecture)" in \
     && mkdir -p "$HOME/.local/bin" \
     && install -m 0755 "${asset}" "$HOME/.local/bin/factory" \
     && rm "${asset}" \
-    && factory --help
+    && version="$(factory --version)" && echo "factory ${version}" \
+    && case "${version}" in \
+         "${FACTORY_VERSION}" | "${FACTORY_VERSION}+"*) ;; \
+         *) echo "expected factory ${FACTORY_VERSION}, found ${version}" >&2; exit 1 ;; \
+       esac
 
 # pi's install telemetry (anonymous install/update reports and provider
 # attribution headers) is off. Turn it back on in /settings, or with
