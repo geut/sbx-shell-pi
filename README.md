@@ -196,7 +196,7 @@ Run it from the repository root in any Herdr pane. It:
 
 The kit publishes container port `7731` as `factory-api`; `sbx ports factory` shows its host port. The server speaks plain HTTP. If you change `server.port`, the published port no longer matches.
 
-**At boot**, `factory-autostart` waits for Herdr (which starts when you attach), then runs `factory-up` again for each repository where it ran before: the workspace, and every repository `factory-up` listed in `~/.local/state/factory/roots`. Each needs its own `server.port`; remove a line from that file to stop restarting a repository. Its log is `~/.local/state/factory/autostart.log`.
+**At boot**, `factory-autostart` waits for Herdr (which starts when you attach), then runs `factory-up` again for each repository where it ran before: the workspace, and every repository `factory-up` listed in `~/.local/state/factory/roots`. `factory-up` adds a repository there once its server is up, so one it rejected isn't restarted. Each needs its own `server.port`; remove a line from that file to stop restarting a repository. Its log is `~/.local/state/factory/autostart.log`.
 
 **Project skills.** pi finds skills in `.pi/skills` and `.agents/skills`, not in `.claude/skills`. If your repository keeps its skills there for Claude Code, point pi at them in the project's `.pi/settings.json` (paths there resolve from `.pi/`):
 

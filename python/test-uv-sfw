@@ -43,6 +43,8 @@ project "$tmp/other/nested"; venv "$tmp/other/nested" foreign
 project "$tmp/ws" $'[tool.uv.workspace]\nmembers = ["pkg"]\n'; venv "$tmp/ws" foreign
 project "$tmp/ws/pkg"
 mkdir -p "$tmp/none"
+echo 'print("plain")' > "$tmp/repo/plain.py"
+printf '# /// script\n# dependencies = []\n# ///\nprint("meta")\n' > "$tmp/repo/meta.py"
 for d in repo other ws; do git -C "$tmp/$d" init -q; done
 
 fails=0
@@ -84,14 +86,31 @@ check blocked "$tmp/repo/nested" -- sync --project ..
 check blocked "$tmp/other" -- --cache-dir /tmp/c sync --project nested
 check allowed "$tmp/other" -- run pytest --project nested
 check allowed "$tmp/other" -- run -- pytest --project nested
+check allowed "$tmp/other" -- run -m pytest --project nested
 
 # A workspace member uses the workspace root's .venv.
 check blocked "$tmp/ws/pkg" -- sync
 check blocked "$tmp/ws" -- sync --package pkg
 
+# --active uses $VIRTUAL_ENV, or the project's .venv when it's unset.
+check blocked "$tmp/repo" -- sync --active
+check blocked "$tmp/repo" -- run --active pytest
+check blocked "$tmp/other" VIRTUAL_ENV="$tmp/repo/.venv" -- sync --active
+check allowed "$tmp/repo" VIRTUAL_ENV="$tmp/other/.venv" -- sync --active
+check blocked "$tmp/repo" VIRTUAL_ENV="$tmp/other/.venv" -- sync
+
+# A script uses the project's environment unless it has inline metadata.
+check blocked "$tmp/repo" -- run plain.py
+check blocked "$tmp/repo" -- run --script plain.py
+check allowed "$tmp/repo" -- run meta.py
+check allowed "$tmp/repo" -- run --script meta.py
+check allowed "$tmp/repo" -- run -- meta.py
+check allowed "$tmp/repo/nested" -- --directory .. run meta.py
+check allowed "$tmp/repo" -- sync --script meta.py
+check allowed "$tmp/repo" -- add --script meta.py idna
+
 # Other environments, other commands, and no project at all.
 check allowed "$tmp/repo" UV_PROJECT_ENVIRONMENT=.venv-sandbox -- sync
-check allowed "$tmp/repo" -- run --active pytest
 check allowed "$tmp/repo" -- run --no-project python
 check allowed "$tmp/repo" -- lock
 check allowed "$tmp/repo" -- pip list

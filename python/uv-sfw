@@ -9,30 +9,40 @@
 # their environment, and a timeout signals them, not sfw. Put the flag right
 # after `run`.
 #
-# `uv run`, `sync`, `add` and `remove` refuse to touch the project
-# environment when its interpreter doesn't exist here, such as a macOS .venv
-# in a checkout mounted from the host: uv would delete it and build a Linux
-# one, breaking the host's environment. The environment is the one uv picks:
-# .venv at the root of the workspace that --project, --directory, UV_PROJECT
-# or the current directory selects. Set UV_PROJECT_ENVIRONMENT to use another
-# directory.
+# `uv run`, `sync`, `add` and `remove` refuse to touch an environment whose
+# interpreter doesn't exist here, such as a macOS .venv in a checkout mounted
+# from the host: uv would delete it and build a Linux one, breaking the
+# host's environment. The environment is the one uv picks: $VIRTUAL_ENV with
+# --active, or else .venv at the root of the workspace that --project,
+# --directory, UV_PROJECT or the current directory selects. A script with
+# inline metadata (`# /// script`) gets an environment of its own, so it's
+# left alone. Set UV_PROJECT_ENVIRONMENT to use another directory.
 real=/usr/local/lib/python-kit/bin
 tool="$(basename "$0")"
 
-# For `uv run|sync|add|remove`, prints the project environment uv would use
-# when its interpreter is missing. Only the options that pick the project
-# reach `uv workspace dir`, which finds the workspace root without resolving.
+# For `uv run|sync|add|remove`, prints the environment uv would use when its
+# interpreter is missing. Only the options that pick the project reach
+# `uv workspace dir`, which finds the workspace root without resolving.
 foreign_venv() {
   end=__uv_sfw_end__
-  cmd=
+  cmd= active= target= dir=.
   set -- "$@" "$end"
   while [ "$1" != "$end" ]; do
     arg="$1"; shift
     case "$arg" in
-      --) break ;;
-      --project | --directory) [ "$1" = "$end" ] || { set -- "$@" "$arg" "$1"; shift; } ;;
-      --project=* | --directory=*) set -- "$@" "$arg" ;;
-      --active | --no-project | --script) return 1 ;;
+      --)
+        [ "$cmd" = run ] && [ "$1" != "$end" ] && target="$1"
+        break ;;
+      --project) [ "$1" = "$end" ] || { set -- "$@" "$arg" "$1"; shift; } ;;
+      --directory) [ "$1" = "$end" ] || { dir="$1"; set -- "$@" "$arg" "$1"; shift; } ;;
+      --project=*) set -- "$@" "$arg" ;;
+      --directory=*) dir="${arg#*=}"; set -- "$@" "$arg" ;;
+      --active) active=1 ;;
+      --no-project) return 1 ;;
+      # `uv run --script` is a flag: the command is the script. The other
+      # commands take the script as its value and work on its own
+      # environment.
+      --script) [ "$cmd" = run ] || return 1 ;;
       # Options whose value is a separate word, so it isn't taken for the
       # subcommand or for the command `uv run` runs.
       --cache-dir | --config-file | --color | --python | -p | --package | \
@@ -48,6 +58,7 @@ foreign_venv() {
           cmd="$arg"
           case "$cmd" in run | sync | add | remove) ;; *) return 1 ;; esac
         elif [ "$cmd" = run ]; then
+          target="$arg"
           break # the command uv runs; its arguments aren't uv's
         fi
         ;;
@@ -56,11 +67,20 @@ foreign_venv() {
   [ -n "$cmd" ] || return 1
   while [ "$1" != "$end" ]; do shift; done
   shift
-  root="$("$real/uv" workspace dir "$@" 2>/dev/null)" || return 1
-  cfg="$root/.venv/pyvenv.cfg"
-  [ -f "$cfg" ] || return 1
-  home="$(sed -n 's/^home *= *//p' "$cfg" | head -n 1)"
-  [ -n "$home" ] && [ ! -d "$home" ] && echo "$root/.venv"
+  # A script with inline metadata runs in its own environment.
+  if [ -n "$target" ]; then
+    case "$target" in /*) file="$target" ;; *) file="$dir/$target" ;; esac
+    [ -f "$file" ] && grep -q '^# /// script$' "$file" && return 1
+  fi
+  if [ -n "$active" ] && [ -n "${VIRTUAL_ENV:-}" ]; then
+    venv="$VIRTUAL_ENV"
+  else
+    root="$("$real/uv" workspace dir "$@" 2>/dev/null)" || return 1
+    venv="$root/.venv"
+  fi
+  [ -f "$venv/pyvenv.cfg" ] || return 1
+  home="$(sed -n 's/^home *= *//p' "$venv/pyvenv.cfg" | head -n 1)"
+  [ -n "$home" ] && [ ! -d "$home" ] && echo "$venv"
 }
 
 if [ "$tool" = uv ] && [ -z "${UV_PROJECT_ENVIRONMENT:-}" ] && venv="$(foreign_venv "$@")"; then

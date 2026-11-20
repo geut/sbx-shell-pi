@@ -42,11 +42,6 @@ if git_dir="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2
   fi
 fi
 
-# factory-autostart restarts the server at boot for every repository listed
-# here, wherever its checkout lives (the host mount or the sandbox's disk).
-mkdir -p "$state"
-grep -qxF "$root" "$state/roots" 2>/dev/null || printf '%s\n' "$root" >> "$state/roots"
-
 # Each server needs its own port: one that answers /health on another
 # repository's port would pass for this repository's server. Prints
 # "<port> <root>" for every other recorded repository with a FACTORY.json.
@@ -54,7 +49,9 @@ other_ports() {
   node -e '
     const fs = require("node:fs");
     const [self, list] = process.argv.slice(1);
-    for (const other of fs.readFileSync(list, "utf8").split("\n")) {
+    let roots = "";
+    try { roots = fs.readFileSync(list, "utf8"); } catch {}
+    for (const other of roots.split("\n")) {
       if (!other || other === self) continue;
       try {
         const config = JSON.parse(fs.readFileSync(`${other}/.factory/FACTORY.json`, "utf8"));
@@ -184,6 +181,13 @@ else
   fi
   echo "Factory server listening at $url (Herdr pane $pane)."
 fi
+
+# factory-autostart restarts the server at boot for every repository listed
+# here, wherever its checkout lives (the host mount or the sandbox's disk).
+# Only a repository whose server came up is listed, so one that failed
+# doesn't hold a port against the others.
+mkdir -p "$state"
+grep -qxF "$root" "$state/roots" 2>/dev/null || printf '%s\n' "$root" >> "$state/roots"
 
 # Tokens are shown once, so keep the dashboard's in the factory root next to
 # local.token. Replace it only when the server no longer accepts it.
