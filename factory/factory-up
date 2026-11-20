@@ -13,17 +13,70 @@ esac
 root="$(git -C "${1:-$PWD}" rev-parse --show-toplevel 2>/dev/null || (cd "${1:-$PWD}" && pwd))"
 config="$root/.factory/FACTORY.json"
 env_file="$root/.factory/dashboard.env"
+state="$HOME/.local/state/factory"
+
+# The proxy adds GitHub credentials to HTTPS only, and git never prompts, so
+# an SSH origin fails the factory's fetch before every ticket. Send SSH GitHub
+# URLs over HTTPS in the sandbox user's global config; the repository's own
+# config and the host are left alone.
+origin="$(git -C "$root" remote get-url origin 2>/dev/null || true)"
+case "$origin" in
+  git@github.com:* | ssh://git@github.com/*)
+    for ssh_url in git@github.com: ssh://git@github.com/; do
+      if ! git config --global --get-all url.https://github.com/.insteadOf | grep -qxF "$ssh_url"; then
+        git config --global --add url.https://github.com/.insteadOf "$ssh_url"
+      fi
+    done
+    echo "origin is $origin; git in this sandbox reaches GitHub over HTTPS instead (url.https://github.com/.insteadOf in ~/.gitconfig)."
+    ;;
+esac
+
+# .factory/ is the factory's untracked state, worktrees included. Keep it out
+# of git status through info/exclude, which is local and never committed.
+if git_dir="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
+  exclude="$git_dir/info/exclude"
+  if ! grep -qxF '/.factory/' "$exclude" 2>/dev/null; then
+    mkdir -p "$git_dir/info"
+    printf '/.factory/\n' >> "$exclude"
+    echo "Added /.factory/ to $exclude."
+  fi
+fi
+
+# Each server needs its own port: one that answers /health on another
+# repository's port would pass for this repository's server. Prints
+# "<port> <root>" for every other recorded repository with a FACTORY.json.
+other_ports() {
+  node -e '
+    const fs = require("node:fs");
+    const [self, list] = process.argv.slice(1);
+    let roots = "";
+    try { roots = fs.readFileSync(list, "utf8"); } catch {}
+    for (const other of roots.split("\n")) {
+      if (!other || other === self) continue;
+      try {
+        const config = JSON.parse(fs.readFileSync(`${other}/.factory/FACTORY.json`, "utf8"));
+        console.log(`${config.server?.port ?? 7731} ${other}`);
+      } catch {}
+    }
+  ' "$root" "$state/roots"
+}
+
+# The dashboard reads $WORKSPACE_DIR/.factory/dashboard.env.
+if [ -x /usr/local/bin/factory-dashboard ] && [ "${WORKSPACE_DIR:-$root}" != "$root" ]; then
+  echo "Note: the dashboard reads $WORKSPACE_DIR/.factory/dashboard.env, not this repository's. Run the factory in $WORKSPACE_DIR to use it." >&2
+fi
 
 # A repository without a factory gets a starter FACTORY.json. Only the models
 # are required; FACTORY_WORK_MODEL and FACTORY_REVIEW_MODEL override the
 # defaults, which must differ. A GitHub origin fills in tracker and codeHost,
-# with pull requests off until the user opts in.
+# with pull requests off until the user opts in. The port is 7731, the one
+# the kit publishes, unless another repository's factory already uses it;
+# then the next free one, skipping the dashboard's 7732.
 if [ ! -f "$config" ]; then
   mkdir -p "$root/.factory"
-  origin="$(git -C "$root" remote get-url origin 2>/dev/null || true)"
   node -e '
     const fs = require("node:fs");
-    const [file, root, origin, work, review] = process.argv.slice(1);
+    const [file, root, origin, work, review, used] = process.argv.slice(1);
     if (work === review) {
       console.error(`FACTORY_WORK_MODEL and FACTORY_REVIEW_MODEL must differ (both are ${work}).`);
       process.exit(1);
@@ -33,6 +86,9 @@ if [ ! -f "$config" ]; then
       models: { work, review },
       server: { host: "0.0.0.0", port: 7731 },
     };
+    // 7732 is the dashboard mixin'"'"'s port.
+    const taken = new Set([7732, ...used.split("\n").filter(Boolean).map((line) => Number(line.split(" ")[0]))]);
+    while (taken.has(config.server.port)) config.server.port++;
     const gh = origin.match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?\/?$/);
     if (gh) {
       const [, owner, repo] = gh;
@@ -42,7 +98,8 @@ if [ ! -f "$config" ]; then
     fs.writeFileSync(file, JSON.stringify(config, null, 2) + "\n", { flag: "wx" });
   ' "$config" "$root" "$origin" \
     "${FACTORY_WORK_MODEL:-anthropic/claude-sonnet-5-5}" \
-    "${FACTORY_REVIEW_MODEL:-anthropic/claude-opus-5-5}"
+    "${FACTORY_REVIEW_MODEL:-anthropic/claude-opus-5-5}" \
+    "$(other_ports)"
   echo "Created $config with starter settings. Review the models before /factory start."
 fi
 
@@ -71,6 +128,13 @@ case "$host" in
   *) connect="$host" ;;
 esac
 url="http://$connect:$port"
+
+conflict="$(other_ports | awk -v port="$port" '$1 == port { sub(/^[^ ]+ /, ""); print; exit }')"
+if [ -n "$conflict" ]; then
+  echo "$config and $conflict/.factory/FACTORY.json both set server.port $port, so one repository's server would pass for the other's." >&2
+  echo "Give each repository its own server.port (the kit publishes 7731; publish another with sbx ports <sandbox> --publish <port>:<port>), or remove a repository you no longer use from $state/roots. Then run factory-up again." >&2
+  exit 1
+fi
 
 healthy() { curl -fsS --max-time 2 "$url/health" >/dev/null 2>&1; }
 
@@ -117,6 +181,13 @@ else
   fi
   echo "Factory server listening at $url (Herdr pane $pane)."
 fi
+
+# factory-autostart restarts the server at boot for every repository listed
+# here, wherever its checkout lives (the host mount or the sandbox's disk).
+# Only a repository whose server came up is listed, so one that failed
+# doesn't hold a port against the others.
+mkdir -p "$state"
+grep -qxF "$root" "$state/roots" 2>/dev/null || printf '%s\n' "$root" >> "$state/roots"
 
 # Tokens are shown once, so keep the dashboard's in the factory root next to
 # local.token. Replace it only when the server no longer accepts it.

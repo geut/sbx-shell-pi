@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# Tests uv-sfw's guard against a project environment whose interpreter is
+# missing. Needs a real uv: test-uv-sfw [path/to/uv] (default: uv on PATH).
+# sfw is stubbed, so nothing is downloaded and uv never runs past the guard.
+set -euo pipefail
+
+here="$(cd "$(dirname "$0")" && pwd)"
+uv_bin="$(command -v "${1:-uv}")"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+# The wrapper, pointed at this uv, plus a stub sfw that only says it ran.
+mkdir -p "$tmp/real" "$tmp/bin"
+ln -s "$uv_bin" "$tmp/real/uv"
+sed "s|^real=.*|real=$tmp/real|" "$here/uv-sfw" > "$tmp/bin/uv"
+printf '#!/bin/sh\necho sfw-ran\n' > "$tmp/bin/sfw"
+chmod +x "$tmp/bin/uv" "$tmp/bin/sfw"
+export PATH="$tmp/bin:$PATH"
+unset UV_PROJECT UV_PROJECT_ENVIRONMENT VIRTUAL_ENV
+
+project() { # project <dir> [extra pyproject lines]
+  mkdir -p "$1"
+  printf '[project]\nname = "%s"\nversion = "0"\n%s' "$(basename "$1")" "${2:-}" > "$1/pyproject.toml"
+}
+venv() { # venv <dir> foreign|local
+  mkdir -p "$1/.venv"
+  case "$2" in
+    foreign) home=/Library/Frameworks/Python.framework/Versions/3.12/bin ;;
+    local) home=/usr/bin ;;
+  esac
+  printf 'home = %s\nversion = 3.12\n' "$home" > "$1/.venv/pyvenv.cfg"
+}
+
+# repo/          foreign .venv
+# repo/nested/   separate project, no .venv
+# other/         local .venv
+# other/nested/  separate project, foreign .venv
+# ws/            workspace root with member pkg, foreign .venv
+project "$tmp/repo"; venv "$tmp/repo" foreign
+project "$tmp/repo/nested"
+project "$tmp/other"; venv "$tmp/other" local
+project "$tmp/other/nested"; venv "$tmp/other/nested" foreign
+project "$tmp/ws" $'[tool.uv.workspace]\nmembers = ["pkg"]\n'; venv "$tmp/ws" foreign
+project "$tmp/ws/pkg"
+mkdir -p "$tmp/none"
+echo 'print("plain")' > "$tmp/repo/plain.py"
+printf '# /// script\n# dependencies = []\n# ///\nprint("meta")\n' > "$tmp/repo/meta.py"
+for d in repo other ws; do git -C "$tmp/$d" init -q; done
+
+fails=0
+check() { # check blocked|allowed <dir> <env...> -- <uv args...>
+  local want="$1" dir="$2"; shift 2
+  local envs=()
+  while [ "$1" != -- ]; do envs+=("$1"); shift; done
+  shift
+  local got
+  if (cd "$dir" && env ${envs[@]+"${envs[@]}"} uv "$@") >/dev/null 2>&1; then got=allowed; else got=blocked; fi
+  if [ "$got" = "$want" ]; then
+    echo "ok   $want: (${dir#"$tmp"/}) ${envs[*]+${envs[*]} }uv $*"
+  else
+    echo "FAIL want $want, got $got: (${dir#"$tmp"/}) ${envs[*]+${envs[*]} }uv $*"
+    fails=$((fails + 1))
+  fi
+}
+
+# The project in the current directory.
+check blocked "$tmp/repo" -- sync
+check blocked "$tmp/repo" -- run pytest
+check blocked "$tmp/repo" -- add requests
+check blocked "$tmp/repo" -- remove requests
+check allowed "$tmp/other" -- sync
+
+# --project and --directory pick another project, in every spelling.
+check allowed "$tmp/repo" -- sync --project nested
+check allowed "$tmp/repo" -- sync --directory nested
+check allowed "$tmp/repo" -- --project nested sync
+check blocked "$tmp/other" -- sync --project nested
+check blocked "$tmp/other" -- sync --project=nested
+check blocked "$tmp/other" -- --directory nested sync
+check blocked "$tmp/other" -- --directory=nested run pytest
+check blocked "$tmp/other" UV_PROJECT=nested -- sync
+check allowed "$tmp/repo/nested" -- sync
+check blocked "$tmp/repo/nested" -- sync --project ..
+
+# Option values and the command uv run runs aren't uv's.
+check blocked "$tmp/other" -- --cache-dir /tmp/c sync --project nested
+check allowed "$tmp/other" -- run pytest --project nested
+check allowed "$tmp/other" -- run -- pytest --project nested
+check allowed "$tmp/other" -- run -m pytest --project nested
+
+# A workspace member uses the workspace root's .venv.
+check blocked "$tmp/ws/pkg" -- sync
+check blocked "$tmp/ws" -- sync --package pkg
+
+# --active uses $VIRTUAL_ENV, or the project's .venv when it's unset.
+check blocked "$tmp/repo" -- sync --active
+check blocked "$tmp/repo" -- run --active pytest
+check blocked "$tmp/other" VIRTUAL_ENV="$tmp/repo/.venv" -- sync --active
+check allowed "$tmp/repo" VIRTUAL_ENV="$tmp/other/.venv" -- sync --active
+check blocked "$tmp/repo" VIRTUAL_ENV="$tmp/other/.venv" -- sync
+
+# A script uses the project's environment unless it has inline metadata.
+check blocked "$tmp/repo" -- run plain.py
+check blocked "$tmp/repo" -- run --script plain.py
+check allowed "$tmp/repo" -- run meta.py
+check allowed "$tmp/repo" -- run --script meta.py
+check allowed "$tmp/repo" -- run -- meta.py
+check allowed "$tmp/repo/nested" -- --directory .. run meta.py
+check allowed "$tmp/repo" -- sync --script meta.py
+check allowed "$tmp/repo" -- add --script meta.py idna
+
+# UV_PROJECT_ENVIRONMENT replaces .venv, relative to the workspace root, but
+# --active with $VIRTUAL_ENV still wins.
+check allowed "$tmp/repo" UV_PROJECT_ENVIRONMENT=.venv-sandbox -- sync
+check allowed "$tmp/repo/nested" UV_PROJECT_ENVIRONMENT=.venv -- sync --project ../../other
+check blocked "$tmp/other" UV_PROJECT_ENVIRONMENT=nested/.venv -- sync
+check blocked "$tmp/other" UV_PROJECT_ENVIRONMENT="$tmp/repo/.venv" -- sync
+check blocked "$tmp/repo" UV_PROJECT_ENVIRONMENT=.venv-sandbox VIRTUAL_ENV="$tmp/repo/.venv" -- sync --active
+check allowed "$tmp/repo" UV_PROJECT_ENVIRONMENT=.venv-sandbox VIRTUAL_ENV="$tmp/repo/.venv" -- sync
+check allowed "$tmp/other" UV_PROJECT_ENVIRONMENT="$tmp/repo/.venv" VIRTUAL_ENV="$tmp/other/.venv" -- sync --active
+
+# Other commands, and no project at all.
+check allowed "$tmp/repo" -- run --no-project python
+check allowed "$tmp/repo" -- lock
+check allowed "$tmp/repo" -- pip list
+check allowed "$tmp/none" -- sync
+
+if [ "$fails" -gt 0 ]; then
+  echo "$fails failed" >&2
+  exit 1
+fi
+echo "all passed"

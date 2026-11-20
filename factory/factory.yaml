@@ -22,9 +22,10 @@ args:
     description: modem-dev/hunk release that provides the hunk binary
     buildArg: HUNK_VERSION
   factory_version:
-    default: "0.3.0"
-    pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'
-    description: geut/factory-skills release that provides the factory binary
+    default: "0.6.4"
+    # 0.6.0 or later: earlier releases need the factory-skills Pi package
+    pattern: '^(0\.([6-9]|[1-9][0-9]+)|[1-9][0-9]*\.[0-9]+)\.[0-9]+$'
+    description: geut/factory-skills release a new sandbox starts on (0.6.0 or later); the factory updates itself from there
     buildArg: FACTORY_VERSION
 
 capabilities:
@@ -52,13 +53,19 @@ capabilities:
           - herdr.dev
           # Linear tracker (factory-skills 0.3.0 and later)
           - api.linear.app
+          # Docker Hub, so the sandbox's Docker daemon can pull images, such as
+          # the services a project's tests run
+          - registry-1.docker.io
+          - auth.docker.io
+          - production.cloudfront.docker.com
+          - production.cloudflare.docker.com
   - type: com.docker.sandbox/lifecycle@1
     config:
       startup:
         - command: [/usr/local/bin/factory-autostart]
           background: true
           env: [WORKSPACE_DIR]
-          description: Restart the factory server once Herdr is up, if factory-up ran before
+          description: Restart the factory server once Herdr is up, for each repository where factory-up ran
   - type: com.docker.sandbox/agent-context@1
     config:
       filename: AGENTS.md

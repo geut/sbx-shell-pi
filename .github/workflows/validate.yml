@@ -87,3 +87,26 @@ jobs:
 
       - name: kit-tck validate
         run: kit-tck validate --layout "${RUNNER_TEMP}/layout" ci
+
+  # uv-sfw's guard asks uv which environment a command uses, so test it with
+  # the uv version the python kit installs.
+  uv-guard:
+    runs-on: ubuntu-latest
+    name: test uv-sfw guard
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        run: |
+          set -euo pipefail
+          version="$(sed -n '/uv_version:/,/default:/s/^ *default: *"\(.*\)"/\1/p' python/python.yaml)"
+          cd "$RUNNER_TEMP"
+          asset="uv-x86_64-unknown-linux-musl.tar.gz"
+          base="https://github.com/astral-sh/uv/releases/download/${version}"
+          curl -fsSLO "${base}/${asset}"
+          curl -fsSL "${base}/${asset}.sha256" | sha256sum -c -
+          tar -xzf "${asset}" --strip-components=1
+          ./uv --version
+
+      - name: Test
+        run: python/test-uv-sfw "$RUNNER_TEMP/uv"
