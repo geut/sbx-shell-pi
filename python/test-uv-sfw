@@ -109,8 +109,17 @@ check allowed "$tmp/repo/nested" -- --directory .. run meta.py
 check allowed "$tmp/repo" -- sync --script meta.py
 check allowed "$tmp/repo" -- add --script meta.py idna
 
-# Other environments, other commands, and no project at all.
+# UV_PROJECT_ENVIRONMENT replaces .venv, relative to the workspace root, but
+# --active with $VIRTUAL_ENV still wins.
 check allowed "$tmp/repo" UV_PROJECT_ENVIRONMENT=.venv-sandbox -- sync
+check allowed "$tmp/repo/nested" UV_PROJECT_ENVIRONMENT=.venv -- sync --project ../../other
+check blocked "$tmp/other" UV_PROJECT_ENVIRONMENT=nested/.venv -- sync
+check blocked "$tmp/other" UV_PROJECT_ENVIRONMENT="$tmp/repo/.venv" -- sync
+check blocked "$tmp/repo" UV_PROJECT_ENVIRONMENT=.venv-sandbox VIRTUAL_ENV="$tmp/repo/.venv" -- sync --active
+check allowed "$tmp/repo" UV_PROJECT_ENVIRONMENT=.venv-sandbox VIRTUAL_ENV="$tmp/repo/.venv" -- sync
+check allowed "$tmp/other" UV_PROJECT_ENVIRONMENT="$tmp/repo/.venv" VIRTUAL_ENV="$tmp/other/.venv" -- sync --active
+
+# Other commands, and no project at all.
 check allowed "$tmp/repo" -- run --no-project python
 check allowed "$tmp/repo" -- lock
 check allowed "$tmp/repo" -- pip list

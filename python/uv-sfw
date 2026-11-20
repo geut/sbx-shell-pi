@@ -13,10 +13,11 @@
 # interpreter doesn't exist here, such as a macOS .venv in a checkout mounted
 # from the host: uv would delete it and build a Linux one, breaking the
 # host's environment. The environment is the one uv picks: $VIRTUAL_ENV with
-# --active, or else .venv at the root of the workspace that --project,
-# --directory, UV_PROJECT or the current directory selects. A script with
-# inline metadata (`# /// script`) gets an environment of its own, so it's
-# left alone. Set UV_PROJECT_ENVIRONMENT to use another directory.
+# --active, or else UV_PROJECT_ENVIRONMENT (relative to the workspace root) or
+# .venv at the root of the workspace that --project, --directory, UV_PROJECT
+# or the current directory selects. A script with inline metadata
+# (`# /// script`) gets an environment of its own, so it's left alone. Set
+# UV_PROJECT_ENVIRONMENT to a new directory to keep a separate environment.
 real=/usr/local/lib/python-kit/bin
 tool="$(basename "$0")"
 
@@ -76,16 +77,20 @@ foreign_venv() {
     venv="$VIRTUAL_ENV"
   else
     root="$("$real/uv" workspace dir "$@" 2>/dev/null)" || return 1
-    venv="$root/.venv"
+    case "${UV_PROJECT_ENVIRONMENT:-}" in
+      "") venv="$root/.venv" ;;
+      /*) venv="$UV_PROJECT_ENVIRONMENT" ;;
+      *) venv="$root/$UV_PROJECT_ENVIRONMENT" ;;
+    esac
   fi
   [ -f "$venv/pyvenv.cfg" ] || return 1
   home="$(sed -n 's/^home *= *//p' "$venv/pyvenv.cfg" | head -n 1)"
   [ -n "$home" ] && [ ! -d "$home" ] && echo "$venv"
 }
 
-if [ "$tool" = uv ] && [ -z "${UV_PROJECT_ENVIRONMENT:-}" ] && venv="$(foreign_venv "$@")"; then
+if [ "$tool" = uv ] && venv="$(foreign_venv "$@")"; then
   echo "uv: $venv was made by an interpreter that isn't in this sandbox (probably the host's), so uv would replace it and break it there." >&2
-  echo "Run uv in a factory worktree, or set UV_PROJECT_ENVIRONMENT (for example .venv-sandbox) to keep a separate environment." >&2
+  echo "Run uv in a factory worktree, or set UV_PROJECT_ENVIRONMENT to a new directory (for example .venv-sandbox) to keep a separate environment." >&2
   exit 2
 fi
 
