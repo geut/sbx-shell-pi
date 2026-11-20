@@ -59,7 +59,7 @@ factory-up
 
 The first time, this creates `.factory/FACTORY.json` with starter settings, then starts the factory server in a Herdr workspace named `factory`. Open `.factory/FACTORY.json` and check the models (`models.work` and `models.review`) before going on. The [factory-skills README](https://github.com/geut/factory-skills#factory-root) explains every setting.
 
-Then start `pi` in a pane and run:
+Then start `pi` in a pane and run the command below. The server installs pi's `/factory` extension each time it starts, so a `pi` that was already open needs `/reload` first.
 
 ```text
 /factory start
@@ -82,6 +82,7 @@ Open the host port listed for `factory-dashboard` in your browser. Until `factor
 - **Detach** from Herdr with `ctrl+b`, then `q`. The agents keep running ([Herdr quick start](https://herdr.dev/docs/quick-start/)).
 - **Reattach** with `sbx run factory`. `sbx ls` lists your sandboxes.
 - **After a restart** (`sbx stop`, then `sbx run factory`), the factory server starts again by itself once Herdr is up. There's no need to run `factory-up` again.
+- **Update the factory** with `/factory update` when pi says a new release is out ([Updating the factory](#updating-the-factory)).
 - **Edit files** with `fresh`, the default editor. **Review diffs** with `hunk diff`.
 
 ## Keep the code in the sandbox
@@ -171,7 +172,7 @@ In a host-mounted sandbox the work is already on your computer: ticket branches 
 - Latest Node.js 24.x, checked against `SHASUMS256.txt`
 - [pi](https://pi.dev), with `npm` going through [Socket Firewall](https://github.com/SocketDev/sfw-free/) (`sfw npm`) in bash, and its install telemetry (anonymous install and update reports, provider attribution headers) off. Turn it on in pi's `/settings`, or with `PI_TELEMETRY=1`.
 - [Herdr](https://herdr.dev) as the entrypoint, with its pi integration and agent skill
-- `factory` and the [factory-skills](https://github.com/geut/factory-skills) pi package (the `/factory` command and stage skills), from the same release (`factory_version` kit arg, default `0.4.1`). The binary is checked against the release's `.sha256`.
+- The `factory` binary from a [factory-skills](https://github.com/geut/factory-skills) release, checked against the release's `.sha256`. It's the whole factory: the server, the stage skills, and pi's `/factory` command, widget and cards, which `factory serve` writes to `~/.pi/agent/extensions/factory/` each time it starts. There's no pi package to install. `factory_version` (kit arg, default `0.6.4`) is only the release a new sandbox starts on: the factory [updates itself](#updating-the-factory) from there.
 - `factory-up` and a startup hook that restarts the server at boot
 - [GitHub CLI](https://cli.github.com/) (`gh`)
 - [Fresh](https://github.com/sinelaw/fresh) editor (`$EDITOR`)
@@ -214,6 +215,32 @@ sbx secret set-custom --sandbox factory --host api.linear.app --env LINEAR_API_K
 
 ```bash
 FACTORY_GITHUB_WEBHOOK_SECRET=... factory-up
+```
+
+### Updating the factory
+
+The factory server checks GitHub once a day for a newer release. When it finds one, pi shows a card and a footer line. To update:
+
+```text
+/factory update               in pi (add --when-idle to wait until no agent runs)
+factory update                in a shell
+```
+
+The server downloads the release's binary with `gh`, which uses the sandbox's GitHub token (`sbx secret set github`, as for a GitHub tracker), checks it against its `.sha256`, replaces `~/.local/bin/factory` (keeping the old one as `factory.previous`), and restarts on it, adopting the running agents. Each open `pi` then asks for `/reload` to load the matching `/factory`. `/factory update --rollback` goes back. The new binary stays in the sandbox across `sbx stop` and `sbx run`; recreating the sandbox starts again from `factory_version`. See [factory-skills: Updates](https://github.com/geut/factory-skills#updates).
+
+**Sandboxes made before the factory updated itself** (`factory_version` below `0.6.0`) can't run `factory update`, and they also have the factory-skills pi package, pinned to their release. Recreating the sandbox from this kit starts clean. To keep the sandbox, replace the binary by hand, in the sandbox:
+
+```bash
+arch="$(dpkg --print-architecture | sed 's/amd64/x64/')"
+cd /tmp && gh release download v0.6.4 -R geut/factory-skills \
+  -p "factory-linux-$arch" -p "factory-linux-$arch.sha256" --clobber
+sha256sum -c "factory-linux-$arch.sha256" && install -m 0755 "factory-linux-$arch" ~/.local/bin/factory
+```
+
+Stop the server (Ctrl-C in its pane in the `factory` workspace) and run `factory-up`. The new server upgrades the factory's database (keeping a copy in `.factory/db/`), installs `/factory`, and names the pinned package once. Remove the package with the command it gives, then `/reload` pi:
+
+```bash
+pi remove git:github.com/geut/factory-skills@v0.4.1
 ```
 
 ### Factory contract

@@ -1,7 +1,7 @@
 FROM docker/sandbox-templates:shell-docker
 
 ARG PI_VERSION=latest
-ARG FACTORY_VERSION=0.4.1
+ARG FACTORY_VERSION=0.6.4
 ARG HUNK_VERSION=0.24.1
 
 USER root
@@ -84,7 +84,12 @@ RUN printf '\n# Herdr installer path\nexport PATH="$HOME/.local/bin:$PATH"\n' >>
     && herdr integration install pi \
     && npx --yes skills add herdrdev/herdr --skill herdr -g -y --agent pi --copy
 
-# Factory server: prebuilt binary from the geut/factory-skills release, checked against its .sha256
+# The factory: prebuilt binary from the geut/factory-skills release, checked
+# against its .sha256. It is the whole factory: it carries the stage skills and
+# the operator's Pi extension (/factory), which `factory serve` writes to
+# ~/.pi/agent/extensions/factory on every start. FACTORY_VERSION is only the
+# release a new sandbox starts on; the factory updates itself from there
+# (/factory update), replacing this file, so it lives in the agent's home.
 RUN case "$(dpkg --print-architecture)" in \
          amd64) FACTORY_ARCH="x64" ;; \
          arm64) FACTORY_ARCH="arm64" ;; \
@@ -99,10 +104,6 @@ RUN case "$(dpkg --print-architecture)" in \
     && install -m 0755 "${asset}" "$HOME/.local/bin/factory" \
     && rm "${asset}" \
     && factory --help
-
-# factory-skills Pi package (the /factory command and stage skills), pinned to the same release as the binary
-RUN pi install "git:github.com/geut/factory-skills@v${FACTORY_VERSION}" \
-    && pi list | tee /dev/stderr | grep -F "git:github.com/geut/factory-skills@v${FACTORY_VERSION}"
 
 # pi's install telemetry (anonymous install/update reports and provider
 # attribution headers) is off. Turn it back on in /settings, or with

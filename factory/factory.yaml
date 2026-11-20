@@ -22,9 +22,9 @@ args:
     description: modem-dev/hunk release that provides the hunk binary
     buildArg: HUNK_VERSION
   factory_version:
-    default: "0.4.1"
+    default: "0.6.4"
     pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'
-    description: geut/factory-skills release that provides the factory binary
+    description: geut/factory-skills release a new sandbox starts on (0.6.0 or later); the factory updates itself from there
     buildArg: FACTORY_VERSION
 
 capabilities:
