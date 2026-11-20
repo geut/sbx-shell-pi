@@ -9,38 +9,64 @@
 # their environment, and a timeout signals them, not sfw. Put the flag right
 # after `run`.
 #
-# `uv run`, `sync`, `add` and `remove` refuse to touch a .venv whose
-# interpreter doesn't exist here, such as a macOS one in a checkout mounted
-# from the host: uv would delete it and build a Linux one, breaking the host's
-# environment. Set UV_PROJECT_ENVIRONMENT to use another directory.
+# `uv run`, `sync`, `add` and `remove` refuse to touch the project
+# environment when its interpreter doesn't exist here, such as a macOS .venv
+# in a checkout mounted from the host: uv would delete it and build a Linux
+# one, breaking the host's environment. The environment is the one uv picks:
+# .venv at the root of the workspace that --project, --directory, UV_PROJECT
+# or the current directory selects. Set UV_PROJECT_ENVIRONMENT to use another
+# directory.
 real=/usr/local/lib/python-kit/bin
 tool="$(basename "$0")"
 
-# The .venv uv would use: the nearest one from here up to the repository root.
+# For `uv run|sync|add|remove`, prints the project environment uv would use
+# when its interpreter is missing. Only the options that pick the project
+# reach `uv workspace dir`, which finds the workspace root without resolving.
 foreign_venv() {
-  top="$(git rev-parse --show-toplevel 2>/dev/null)" || top=/
-  dir="$PWD"
-  while :; do
-    if [ -f "$dir/.venv/pyvenv.cfg" ]; then
-      home="$(sed -n 's/^home *= *//p' "$dir/.venv/pyvenv.cfg" | head -n 1)"
-      [ -n "$home" ] && [ ! -d "$home" ] && { echo "$dir/.venv"; return 0; }
-      return 1
-    fi
-    [ "$dir" = "$top" ] || [ "$dir" = / ] && return 1
-    dir="$(dirname "$dir")"
+  end=__uv_sfw_end__
+  cmd=
+  set -- "$@" "$end"
+  while [ "$1" != "$end" ]; do
+    arg="$1"; shift
+    case "$arg" in
+      --) break ;;
+      --project | --directory) [ "$1" = "$end" ] || { set -- "$@" "$arg" "$1"; shift; } ;;
+      --project=* | --directory=*) set -- "$@" "$arg" ;;
+      --active | --no-project | --script) return 1 ;;
+      # Options whose value is a separate word, so it isn't taken for the
+      # subcommand or for the command `uv run` runs.
+      --cache-dir | --config-file | --color | --python | -p | --package | \
+        --extra | --group | --no-group | --only-group | --index | \
+        --default-index | --index-url | --extra-index-url | --find-links | -f | \
+        --with | --with-editable | --with-requirements | --env-file | \
+        --requirements | -r | --constraints | -c | --optional | --dev-group | \
+        --tag | --branch | --rev | --python-platform | --exclude-newer)
+        [ "$1" = "$end" ] || shift ;;
+      -*) ;;
+      *)
+        if [ -z "$cmd" ]; then
+          cmd="$arg"
+          case "$cmd" in run | sync | add | remove) ;; *) return 1 ;; esac
+        elif [ "$cmd" = run ]; then
+          break # the command uv runs; its arguments aren't uv's
+        fi
+        ;;
+    esac
   done
+  [ -n "$cmd" ] || return 1
+  while [ "$1" != "$end" ]; do shift; done
+  shift
+  root="$("$real/uv" workspace dir "$@" 2>/dev/null)" || return 1
+  cfg="$root/.venv/pyvenv.cfg"
+  [ -f "$cfg" ] || return 1
+  home="$(sed -n 's/^home *= *//p' "$cfg" | head -n 1)"
+  [ -n "$home" ] && [ ! -d "$home" ] && echo "$root/.venv"
 }
 
-if [ "$tool" = uv ] && [ -z "${UV_PROJECT_ENVIRONMENT:-}" ]; then
-  case "${1:-}" in
-    run | sync | add | remove)
-      if venv="$(foreign_venv)"; then
-        echo "uv: $venv was made by an interpreter that isn't in this sandbox (probably the host's), so uv would replace it and break it there." >&2
-        echo "Run uv in a factory worktree, or set UV_PROJECT_ENVIRONMENT (for example .venv-sandbox) to keep a separate environment." >&2
-        exit 2
-      fi
-      ;;
-  esac
+if [ "$tool" = uv ] && [ -z "${UV_PROJECT_ENVIRONMENT:-}" ] && venv="$(foreign_venv "$@")"; then
+  echo "uv: $venv was made by an interpreter that isn't in this sandbox (probably the host's), so uv would replace it and break it there." >&2
+  echo "Run uv in a factory worktree, or set UV_PROJECT_ENVIRONMENT (for example .venv-sandbox) to keep a separate environment." >&2
+  exit 2
 fi
 
 if [ "$tool" = uv ] && [ "${1:-}" = run ]; then

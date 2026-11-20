@@ -47,6 +47,23 @@ fi
 mkdir -p "$state"
 grep -qxF "$root" "$state/roots" 2>/dev/null || printf '%s\n' "$root" >> "$state/roots"
 
+# Each server needs its own port: one that answers /health on another
+# repository's port would pass for this repository's server. Prints
+# "<port> <root>" for every other recorded repository with a FACTORY.json.
+other_ports() {
+  node -e '
+    const fs = require("node:fs");
+    const [self, list] = process.argv.slice(1);
+    for (const other of fs.readFileSync(list, "utf8").split("\n")) {
+      if (!other || other === self) continue;
+      try {
+        const config = JSON.parse(fs.readFileSync(`${other}/.factory/FACTORY.json`, "utf8"));
+        console.log(`${config.server?.port ?? 7731} ${other}`);
+      } catch {}
+    }
+  ' "$root" "$state/roots"
+}
+
 # The dashboard reads $WORKSPACE_DIR/.factory/dashboard.env.
 if [ -x /usr/local/bin/factory-dashboard ] && [ "${WORKSPACE_DIR:-$root}" != "$root" ]; then
   echo "Note: the dashboard reads $WORKSPACE_DIR/.factory/dashboard.env, not this repository's. Run the factory in $WORKSPACE_DIR to use it." >&2
@@ -55,12 +72,14 @@ fi
 # A repository without a factory gets a starter FACTORY.json. Only the models
 # are required; FACTORY_WORK_MODEL and FACTORY_REVIEW_MODEL override the
 # defaults, which must differ. A GitHub origin fills in tracker and codeHost,
-# with pull requests off until the user opts in.
+# with pull requests off until the user opts in. The port is 7731, the one
+# the kit publishes, unless another repository's factory already uses it;
+# then the next free one, skipping the dashboard's 7732.
 if [ ! -f "$config" ]; then
   mkdir -p "$root/.factory"
   node -e '
     const fs = require("node:fs");
-    const [file, root, origin, work, review] = process.argv.slice(1);
+    const [file, root, origin, work, review, used] = process.argv.slice(1);
     if (work === review) {
       console.error(`FACTORY_WORK_MODEL and FACTORY_REVIEW_MODEL must differ (both are ${work}).`);
       process.exit(1);
@@ -70,6 +89,9 @@ if [ ! -f "$config" ]; then
       models: { work, review },
       server: { host: "0.0.0.0", port: 7731 },
     };
+    // 7732 is the dashboard mixin'"'"'s port.
+    const taken = new Set([7732, ...used.split("\n").filter(Boolean).map((line) => Number(line.split(" ")[0]))]);
+    while (taken.has(config.server.port)) config.server.port++;
     const gh = origin.match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?\/?$/);
     if (gh) {
       const [, owner, repo] = gh;
@@ -79,7 +101,8 @@ if [ ! -f "$config" ]; then
     fs.writeFileSync(file, JSON.stringify(config, null, 2) + "\n", { flag: "wx" });
   ' "$config" "$root" "$origin" \
     "${FACTORY_WORK_MODEL:-anthropic/claude-sonnet-5-5}" \
-    "${FACTORY_REVIEW_MODEL:-anthropic/claude-opus-5-5}"
+    "${FACTORY_REVIEW_MODEL:-anthropic/claude-opus-5-5}" \
+    "$(other_ports)"
   echo "Created $config with starter settings. Review the models before /factory start."
 fi
 
@@ -108,6 +131,13 @@ case "$host" in
   *) connect="$host" ;;
 esac
 url="http://$connect:$port"
+
+conflict="$(other_ports | awk -v port="$port" '$1 == port { sub(/^[^ ]+ /, ""); print; exit }')"
+if [ -n "$conflict" ]; then
+  echo "$config and $conflict/.factory/FACTORY.json both set server.port $port, so one repository's server would pass for the other's." >&2
+  echo "Give each repository its own server.port (the kit publishes 7731; publish another with sbx ports <sandbox> --publish <port>:<port>), or remove a repository you no longer use from $state/roots. Then run factory-up again." >&2
+  exit 1
+fi
 
 healthy() { curl -fsS --max-time 2 "$url/health" >/dev/null 2>&1; }
 

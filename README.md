@@ -32,7 +32,7 @@ sbx run --name factory ghcr.io/geut/sbx-shell-pi:node-24-factory /path/to/your/p
   --kit ghcr.io/dpaez/sbx-kit-factory-dashboard:0.3.0
 ```
 
-The `--kit` line adds the [dashboard](https://github.com/dpaez/factory-dashboard). Leave it out if you don't want it. For a Python project, also add `--kit ghcr.io/geut/sbx-shell-pi:python` (see [python/](./python/)). The kit set is fixed when the sandbox is created, so adding a kit later means creating a new sandbox.
+The `--kit` line adds the [dashboard](https://github.com/dpaez/factory-dashboard). Leave it out if you don't want it. For a Python project, also add `--kit ghcr.io/geut/sbx-shell-pi:python` (see [python/](./python/)). The kit set is fixed when the sandbox is created, so adding a kit later means creating a new sandbox. So is the size of the Docker daemon's volume, 10 GiB by default: for tests that run databases or other services in Docker, prefix the command with `DOCKER_SANDBOXES_DOCKER_SIZE=40g`.
 
 This mounts your project from the host, so the sandbox and your computer share one checkout, `.venv` and `.env` included. To keep them apart, [keep the code in the sandbox](#keep-the-code-in-the-sandbox) instead.
 
@@ -109,6 +109,14 @@ A sandbox made with `sbx create` and **no path** mounts nothing from your comput
    sbx run --name factory
    ```
 
+   The sandbox's Docker daemon keeps images, containers and volumes on a volume of its own, 10 GiB by default, and the factory's worktrees and caches are on the sandbox's disk too. A test suite that runs databases or other services in Docker can fill it. For heavier workloads, choose the size when you create the sandbox, since it can't grow later:
+
+   ```bash
+   DOCKER_SANDBOXES_DOCKER_SIZE=40g sbx create --name factory …
+   ```
+
+   `sbx settings set sandbox.disk.dockerVolume 40g` changes the default for every new sandbox.
+
 2. For a private repository, or for the factory to push, give the sandbox a GitHub token (on the host): `sbx secret set github --sandbox factory -t "$(gh auth token)"`. The proxy adds it to HTTPS requests to GitHub; nothing from your SSH agent or git config is used.
 3. In the sandbox, clone into the workspace directory itself (the dashboard and the restart hook look there), over HTTPS:
 
@@ -116,15 +124,15 @@ A sandbox made with `sbx create` and **no path** mounts nothing from your comput
    git clone https://github.com/OWNER/REPO.git ~/workspace
    ```
 
-4. `.factory/` isn't in the repository. To reuse your settings, copy them in from the host; otherwise `factory-up` writes a starter `FACTORY.json`:
+4. `.factory/` isn't in the repository. To reuse your settings, copy them in from the host; otherwise `factory-up` writes a starter `FACTORY.json`. Bring `FACTORY.json`, `CONTEXT.md`, and every file they reference, such as setup or validation scripts in `.factory/bin`. From your checkout on the host, with the list adjusted to your factory:
 
    ```bash
-   sbx exec factory mkdir -p /home/agent/workspace/.factory
-   sbx cp .factory/FACTORY.json factory:/home/agent/workspace/.factory/FACTORY.json
-   sbx cp .factory/CONTEXT.md factory:/home/agent/workspace/.factory/CONTEXT.md
+   tar -czf /tmp/factory-config.tgz -C .factory FACTORY.json CONTEXT.md bin
+   sbx cp /tmp/factory-config.tgz factory:/tmp/factory-config.tgz
+   sbx exec factory sh -c 'mkdir -p ~/workspace/.factory && tar -xzf /tmp/factory-config.tgz -C ~/workspace/.factory'
    ```
 
-   Copy only these. Don't copy `.env`, `.venv` or `local.token`: the sandbox makes its own.
+   `tar` keeps the scripts executable. Leave out the rest of `.factory/` (worktrees, the factory's database, `local.token`, `dashboard.env`), along with `.env` and `.venv`: the sandbox makes its own.
 5. Continue with [step 3](#3-add-your-model-provider-key). `factory-up` runs in `~/workspace`.
 
 Tickets come from the tracker as before. To open a shell in the sandbox from the host, run `sbx exec -it factory bash`.
@@ -152,7 +160,7 @@ In a host-mounted sandbox the work is already on your computer: ticket branches 
 1. Let running tickets reach handoff, or note where they are. The new sandbox starts with an empty factory, and tickets don't carry over.
 2. Push the branches the new sandbox should see. Its clone only has what's on GitHub.
 3. `sbx rm factory` (it asks first). With a host mount, this leaves your files alone.
-4. Create the sandbox as above, and copy `FACTORY.json` and `CONTEXT.md` in.
+4. Create the sandbox as above, and copy `FACTORY.json`, `CONTEXT.md` and the files they reference in.
 5. When you no longer need them, remove the old worktrees on the host (`git worktree list`, then `git worktree remove <path>`) and the rest of `.factory/`.
 
 ## Reference
@@ -174,9 +182,9 @@ In a host-mounted sandbox the work is already on your computer: ticket branches 
 Run it from the repository root in any Herdr pane. It:
 
 1. **Prepares git.** When `origin` is an SSH GitHub URL (`git@github.com:…`), it sends GitHub's SSH URLs over HTTPS in the sandbox user's `~/.gitconfig` (`url.https://github.com/.insteadOf`), because the proxy adds GitHub credentials to HTTPS only and the factory fetches `origin` before every ticket. The repository's own config isn't touched. It also adds `/.factory/` to the repository's `.git/info/exclude`, which is local and never committed, so the factory's worktrees stay out of `git status`.
-2. **Creates `.factory/FACTORY.json`** if the repository has none. The starter config sets `name` to the directory name, `models.work` to `anthropic/claude-sonnet-5-5`, `models.review` to `anthropic/claude-opus-5-5`, and `server` to `0.0.0.0:7731`. Set `FACTORY_WORK_MODEL` and `FACTORY_REVIEW_MODEL` to choose other models (they must differ). When `origin` is a GitHub remote, it also fills in `tracker` (backlog label `factory`) and `codeHost` with `pullRequests: false`. An existing `FACTORY.json` is never rewritten, except for step 3.
+2. **Creates `.factory/FACTORY.json`** if the repository has none. The starter config sets `name` to the directory name, `models.work` to `anthropic/claude-sonnet-5-5`, `models.review` to `anthropic/claude-opus-5-5`, and `server` to `0.0.0.0:7731`, or the next free port from `7733` when another repository's factory already uses `7731` (the dashboard listens on `7732`). Set `FACTORY_WORK_MODEL` and `FACTORY_REVIEW_MODEL` to choose other models (they must differ). When `origin` is a GitHub remote, it also fills in `tracker` (backlog label `factory`) and `codeHost` with `pullRequests: false`. An existing `FACTORY.json` is never rewritten, except for step 3.
 3. **Makes the server reachable.** It sets `server.host` to `0.0.0.0` when the host is missing, `127.0.0.1` or `localhost`, because a published port can't reach the sandbox's loopback. Any other host stays as you set it, with a warning. If a server is already running on the old host, `factory-up` asks you to stop it and run again.
-4. **Starts `factory serve`** in a Herdr workspace named `factory` (the server refuses to start outside Herdr). If a server already answers on `/health`, this step is skipped.
+4. **Starts `factory serve`** in a Herdr workspace named `factory` (the server refuses to start outside Herdr). If a server already answers on `/health`, this step is skipped. Before that, it stops with an error when another repository in `~/.local/state/factory/roots` sets the same `server.port`, since the other repository's server would answer for this one.
 5. **Writes the dashboard's token** to `.factory/dashboard.env` (mode `0600`):
 
    ```bash
@@ -188,7 +196,7 @@ Run it from the repository root in any Herdr pane. It:
 
 The kit publishes container port `7731` as `factory-api`; `sbx ports factory` shows its host port. The server speaks plain HTTP. If you change `server.port`, the published port no longer matches.
 
-**At boot**, `factory-autostart` waits for Herdr (which starts when you attach), then runs `factory-up` again for each repository where it ran before: the workspace, and every repository `factory-up` listed in `~/.local/state/factory/roots`. Its log is `~/.local/state/factory/autostart.log`.
+**At boot**, `factory-autostart` waits for Herdr (which starts when you attach), then runs `factory-up` again for each repository where it ran before: the workspace, and every repository `factory-up` listed in `~/.local/state/factory/roots`. Each needs its own `server.port`; remove a line from that file to stop restarting a repository. Its log is `~/.local/state/factory/autostart.log`.
 
 **Project skills.** pi finds skills in `.pi/skills` and `.agents/skills`, not in `.claude/skills`. If your repository keeps its skills there for Claude Code, point pi at them in the project's `.pi/settings.json` (paths there resolve from `.pi/`):
 
@@ -258,7 +266,7 @@ docker buildx create --name kits --driver docker-container --use
 
 ### Validate
 
-Pull requests that touch a kit build it with the kit frontend, which validates the descriptor, and run [`kit-tck validate`](https://github.com/docker/sandbox-kit-spec/releases) on the result (the **Validate kits** workflow). Building a kit proves its files were produced, not that they work, so also compose it onto its workload and try it before merging.
+Pull requests that touch a kit build it with the kit frontend, which validates the descriptor, and run [`kit-tck validate`](https://github.com/docker/sandbox-kit-spec/releases) on the result (the **Validate kits** workflow). The same workflow runs `python/test-uv-sfw`, the python kit's uv guard tests, with the uv version the kit pins; run it locally with `python/test-uv-sfw [path/to/uv]`. Building a kit proves its files were produced, not that they work, so also compose it onto its workload and try it before merging.
 
 ### Publish
 
